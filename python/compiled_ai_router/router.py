@@ -73,6 +73,9 @@ class CompiledAIRouter:
         return True
 
     def _has_real_key(self) -> bool:
+        """True si podemos hacer llamadas reales al LLM: key real O endpoint local."""
+        if self.config.LLM_BASE_URL:
+            return True
         key = self.config.OPENAI_API_KEY
         return bool(key) and key != "demo"
 
@@ -119,8 +122,10 @@ class CompiledAIRouter:
             output = {"result": f"[simulated passthrough] '{request.prompt[:40]}...'"}
             return output, ASSUMED_DEMO_LLM_LATENCY_MS, est_tokens, est_cost, False
 
-        # Llamada REAL al LLM.
-        client = openai.Client(api_key=self.config.OPENAI_API_KEY)
+        # Llamada REAL al LLM (OpenAI o endpoint local OpenAI-compatible).
+        base_url = self.config.LLM_BASE_URL
+        client = openai.Client(api_key=self.config.OPENAI_API_KEY or "local", base_url=base_url) if base_url \
+            else openai.Client(api_key=self.config.OPENAI_API_KEY)
         start = time.perf_counter()
         response = client.chat.completions.create(
             model=self.config.LLM_MODEL,
@@ -165,8 +170,11 @@ class CompiledAIRouter:
         self.metrics.total_requests += 1
         prompt_hash = self.rust_engine.hash_prompt(request.prompt)
 
+        # force_passthrough / force_compile deben saltear el cache.
+        skip_cache = request.force_passthrough or request.force_compile
+
         # 1. Exact Cache Hit
-        for artifact in list(self.artifacts.values()):
+        for artifact in ([] if skip_cache else list(self.artifacts.values())):
             if artifact.prompt_hash == prompt_hash:
                 output, duration, success = self.execute_artifact(artifact, request.input_data)
                 if success:
@@ -174,7 +182,7 @@ class CompiledAIRouter:
                 else:
                     logger.warning(f"Artifact {artifact.id} failed on input (Drift detected). Triggering re-compilation...")
                     self.metrics.drift_events += 1
-                    new_artifact = compile_task(request, self.config.OPENAI_API_KEY, self.config.LLM_MODEL)
+                    new_artifact = compile_task(request, self.config.OPENAI_API_KEY, self.config.LLM_MODEL, self.config.LLM_BASE_URL)
                     new_artifact.id = artifact.id
                     new_artifact.prompt_hash = prompt_hash
                     self._track_compile_cost(new_artifact)
@@ -206,7 +214,7 @@ class CompiledAIRouter:
 
         # 4. First-time Compile & Cache
         self.metrics.compilations += 1
-        artifact = compile_task(request, self.config.OPENAI_API_KEY, self.config.LLM_MODEL)
+        artifact = compile_task(request, self.config.OPENAI_API_KEY, self.config.LLM_MODEL, self.config.LLM_BASE_URL)
         self._track_compile_cost(artifact)
         self.save_artifact(artifact)
 
@@ -228,9 +236,19 @@ class CompiledAIRouter:
         )
 
     def _track_compile_cost(self, artifact: CompiledArtifact):
-        cc = artifact.metadata.get("compile_cost_usd")
-        if cc:
-            self.compile_costs.append(cc)
+        # Recalcula el costo con las tarifas de config (fallback para modelos
+        # no listados en pricing, ej. modelos locales). Autoritativo.
+        if not artifact.metadata.get("measured"):
+            return
+        pt = artifact.metadata.get("compile_prompt_tokens", 0)
+        ct = artifact.metadata.get("compile_completion_tokens", 0)
+        cost = pricing.cost_usd(
+            self.config.LLM_MODEL, pt, ct,
+            self.config.TOKEN_COST_INPUT, self.config.TOKEN_COST_OUTPUT,
+        )
+        artifact.metadata["compile_cost_usd"] = cost
+        if cost:
+            self.compile_costs.append(cost)
 
     def _on_compiled_hit(self, request: TaskRequest, route: str, output: Any, duration: float, artifact_id: str) -> TaskResponse:
         self.metrics.compiled_hits += 1

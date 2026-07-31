@@ -58,8 +58,21 @@ Base para no engañarse con números falsos.
 - [x] Tokens y costo **reales**: `pricing.py` + `response.usage`; `len(prompt)//4` degradado a estimación explícita solo en demo.
 - [x] Instrumentar por tarea: latencia compilado vs passthrough, cache hit, `drift_events`/`recompilations`, costo, **break-even real** (`compile_cost / costo_por_request`).
 - [x] Comando `measure` sobre un vertical (extracción de facturas): baseline real → compila → N cache hits → vuelca JSON. Dashboard marca MEDIDO vs SIMULADO.
-- [ ] **Pendiente (requiere tu OK — gasta $ y sale a OpenAI):** correr `OPENAI_API_KEY=... python -m compiled_ai_router.cli measure` para obtener los primeros números REALES.
-- **Entregable:** primer número real de "cuánto ahorra esto en X". Con eso decidís si vale seguir.
+- [x] **Primeros números REALES obtenidos** contra modelo local (Ollama `gemma4`, gratis, sin salir a internet) vía `LLM_BASE_URL`. Evidencia: [`docs/measurement-local-gemma4.json`](measurement-local-gemma4.json).
+- [x] Soporte `LLM_BASE_URL` (endpoint OpenAI-compatible local) — permite medir sin gastar ni mandar datos afuera.
+- **Entregable logrado.** Medición real (vertical facturas, gemma4 local, 3 baseline + 1 compile + 20 hits):
+
+  | Métrica | Valor medido | Caveat honesto |
+  |---|---|---|
+  | Speedup | **220x** | Inflado: gemma4 local en Mac tarda ~11 s/call. Contra un modelo cloud (~1-2 s) sería ~20-40x. Igual enorme. |
+  | Latencia compilado | **~51 ms** | Es el spawn de `python3`, no cómputo. Fase 2 lo baja a sub-ms. |
+  | Latencia LLM | **~11.300 ms** | Local, lento. Real. |
+  | Break-even | **~6.6 ejecuciones** | Con tarifas de config aplicadas a tokens reales (ref. "as-if-cloud"). |
+  | Cache hit rate | 83% | Del workload de prueba. |
+
+  **Conclusiones:** (1) el pipeline compila-y-ejecuta funciona end-to-end con un LLM real (incluso uno chico local); (2) el ahorro de latencia es real y grande; (3) el cuello del lado "compilado" es el spawn de intérprete → confirma la prioridad de Fase 2; (4) costo local ≈ $0 real, así que la historia de *ahorro de costo* hay que medirla contra precios cloud reales (correr `measure` con una key de OpenAI para el número comercial definitivo).
+
+- [ ] **Opcional (tu OK — gasta $):** correr `measure` con `OPENAI_API_KEY` real para el número de ahorro de costo cloud definitivo.
 
 ### Fase 2 — Sandbox real
 Bloqueante técnico #1. El fix de velocidad y el de seguridad son el mismo problema (eliminar el spawn).

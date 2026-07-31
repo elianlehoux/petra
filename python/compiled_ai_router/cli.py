@@ -41,7 +41,7 @@ def main():
     # Measure (Fase 1: números honestos con baseline real de LLM)
     measure_p = subparsers.add_parser("measure", help="Medir costo/latencia reales sobre un vertical")
     measure_p.add_argument("--iterations", type=int, default=50)
-    measure_p.add_argument("--output", type=str, default="artifacts/measurement.json")
+    measure_p.add_argument("--output", type=str, default="measurement.json")
 
     # Demo
     subparsers.add_parser("demo", help="Run built-in demo")
@@ -114,17 +114,27 @@ async def run_demo_benchmark(router: CompiledAIRouter, iterations: int = 100):
     print("\n" + generate_dashboard(router.get_metrics()))
 
 
-async def run_measurement(router: CompiledAIRouter, iterations: int = 50, output: str = "artifacts/measurement.json"):
+async def run_measurement(router: CompiledAIRouter, iterations: int = 50, output: str = "measurement.json"):
     """Fase 1 — medición honesta sobre un vertical concreto (extracción de facturas).
 
     Paso A: establecer baseline REAL del LLM (force_passthrough → llamada real).
     Paso B: compilar una vez + ejecutar N cache hits.
     Paso C: volcar métricas medidas a JSON.
 
-    Con API key real, todos los números son medidos. En modo demo, quedan flageados
-    como simulados (measured=False) y sirven solo para ver la forma del reporte.
+    Con API key/endpoint real, todos los números son medidos. En modo demo, quedan
+    flageados como simulados (measured=False) y sirven solo para ver la forma del reporte.
+
+    Corre siempre sobre un ARTIFACT_DIR temporal y limpio, para que runs previos no
+    contaminen la medición ni ensucien el store real.
     """
     import json as _json
+    import tempfile
+    from .config import settings as _settings
+
+    # Router aislado con store temporal (ignora el router pasado).
+    tmp_dir = tempfile.mkdtemp(prefix="carouter_measure_")
+    iso_settings = _settings.model_copy(update={"ARTIFACT_DIR": tmp_dir})
+    router = CompiledAIRouter(iso_settings)
 
     real = router._has_real_key()
     print("🔬 MEDICIÓN — Compiled AI Router (Fase 1)\n")

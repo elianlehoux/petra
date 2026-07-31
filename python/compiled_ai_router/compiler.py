@@ -9,7 +9,6 @@ from typing import Optional
 import openai
 from .models import TaskRequest, CompiledArtifact
 from .validator import validate_script
-from . import pricing
 
 logger = logging.getLogger(__name__)
 
@@ -97,10 +96,10 @@ def get_demo_script(prompt: str, task_type: str) -> str:
             "    main()\n"
         )
 
-def compile_task(request: TaskRequest, api_key: str, model: str) -> CompiledArtifact:
+def compile_task(request: TaskRequest, api_key: str, model: str, base_url: Optional[str] = None) -> CompiledArtifact:
     task_type = request.task_type or detect_task_type(request.prompt)
     prompt_hash = hashlib.sha256(request.prompt.encode()).hexdigest()
-    
+
     artifact = CompiledArtifact(
         id=str(uuid.uuid4()),
         prompt_hash=prompt_hash,
@@ -109,7 +108,8 @@ def compile_task(request: TaskRequest, api_key: str, model: str) -> CompiledArti
         task_type=task_type
     )
 
-    if api_key == "demo" or not api_key:
+    # Modo demo solo si NO hay key real NI endpoint local.
+    if (api_key == "demo" or not api_key) and not base_url:
         logger.info("Demo mode: Generating mock compiled artifact")
         artifact.script_content = get_demo_script(request.prompt, task_type)
         valid, validation_results = validate_script(artifact.script_content, request.input_data, request.expected_output)
@@ -119,7 +119,8 @@ def compile_task(request: TaskRequest, api_key: str, model: str) -> CompiledArti
         return artifact
 
     try:
-        client = openai.Client(api_key=api_key)
+        client = openai.Client(api_key=api_key or "local", base_url=base_url) if base_url \
+            else openai.Client(api_key=api_key)
         start = time.perf_counter()
         response = client.chat.completions.create(
             model=model,
@@ -136,17 +137,16 @@ def compile_task(request: TaskRequest, api_key: str, model: str) -> CompiledArti
         else:
             script = content.strip()
 
-        # Uso y costo REALES de la compilación (medidos, no estimados).
+        # Uso REAL de la compilación (medido). El costo lo calcula el router,
+        # que tiene las tarifas de config para el fallback de modelos locales.
         usage = getattr(response, "usage", None)
         prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
         completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-        compile_cost = pricing.cost_usd(model, prompt_tokens, completion_tokens)
         artifact.metadata.update({
             "measured": True,
             "compile_model": model,
             "compile_prompt_tokens": prompt_tokens,
             "compile_completion_tokens": completion_tokens,
-            "compile_cost_usd": compile_cost,
             "compile_latency_ms": compile_latency_ms,
         })
 
