@@ -51,6 +51,33 @@ def test_security_gate_blocks_getattr_bypass():
     res = gate_2_security("getattr(__builtins__, 'ev' + 'al')('1')")
     assert res.passed is False
 
+import pytest
+
+@pytest.mark.parametrize("script", [
+    "import posix\nposix.system('echo x')",          # posix == os
+    "import builtins\nbuiltins.open('/etc/passwd')",  # reexpone open
+    "import _socket",                                  # red
+    "import ftplib",                                   # red
+    "import pickle",                                   # deserialización
+    "import codecs\ncodecs.open('x')",
+    "import sqlite3",
+    "from os import system",
+])
+def test_allowlist_blocks_equivalent_bypasses(script):
+    # Antes evadibles con módulos no listados; el allowlist los corta.
+    res = gate_2_security(script)
+    assert res.passed is False
+
+@pytest.mark.parametrize("script", [
+    "import json, re, math",
+    "import datetime, collections, itertools",
+    "import base64, hashlib",
+    "import sys\nsys.stdin.read()",
+])
+def test_allowlist_permits_safe_stdlib(script):
+    res = gate_2_security(script)
+    assert res.passed is True
+
 def test_bandit_gate_graceful_and_clean():
     # Script limpio: pasa igual esté o no instalado Bandit (si no está, se saltea).
     from compiled_ai_router.validator import gate_2b_bandit

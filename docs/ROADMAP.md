@@ -78,12 +78,20 @@ Base para no engañarse con números falsos.
 Bloqueante técnico #1. El fix de velocidad y el de seguridad son el mismo problema (eliminar el spawn).
 - [x] **Interino:** ejecución con `resource.setrlimit` (CPU 10s, memoria 512MB best-effort, file 10MB, fds 64) + intérprete aislado `python -I` + env mínimo + cwd temporal + timeout wall 30s (`rust_bridge.py`).
 - [x] **Revalidar SIEMPRE en runtime**: `security_check` corre antes de ejecutar cualquier artifact (defiende artifacts alterados en disco), no solo al compilar (`router.execute_artifact`).
-- [x] Cerrar bypasses del gate estático: `open`, `getattr/setattr/delattr`, `globals/locals/vars`, y acceso a dunders peligrosos (`__class__`, `__bases__`, `__subclasses__`, `__globals__`, `__builtins__`, …). Bloqueo a nivel de nombre y de atributo (`validator.py`). Tests nuevos cubren cada bypass.
+- [x] Cerrar bypasses del gate estático: `open`, `getattr/setattr/delattr`, `globals/locals/vars`, y acceso a dunders peligrosos (`__class__`, `__bases__`, `__subclasses__`, `__globals__`, `__builtins__`, …). Bloqueo a nivel de nombre y de atributo (`validator.py`).
+- [x] **Revisión adversaria (agente de contexto fresco) + fixes** — encontró bugs reales, todos corregidos con test de regresión (42 tests):
+  - **Imports: blocklist → ALLOWLIST.** El blocklist era evadible en una línea (`import posix`=os, `builtins.open`, `_socket`, `ftplib`, `pickle`, `sqlite3`, `codecs.open`…). Ahora solo se permite stdlib segura; 9/9 bypasses bloqueados.
+  - **TOCTOU (C3):** la revalidación runtime chequeaba `script_content` en memoria pero ejecutaba el `.py` en disco. Ahora se sobrescribe el archivo con el contenido validado antes de ejecutar → tamper en disco no tiene efecto.
+  - **Fork bomb:** `import posix/os` (vector de `fork`) bloqueado por el allowlist; además `RLIMIT_NPROC` best-effort.
 - [x] Seguridad de API: CORS sin `allow_origins=*`+credentials; `API_HOST` default `127.0.0.1` (contenedor setea `0.0.0.0`).
 - [x] **Spike WASM completado** ([`docs/wasm-sandbox-spike.md`](wasm-sandbox-spike.md), prototipo en `spike/`): `WasmExecutor` con la misma firma que `LocalExecutor` corre un artifact real sin modificarlo, aislado (fs/red denegados, fuel corta bucles infinitos). **Conclusión:** aislamiento real y barato, pero Python-en-WASM naive es ~2× más lento que el subprocess → ver D-3.
 - [ ] **Siguiente decisión (WASM):** spike de **Wizer** (pre-init de `python.wasm`) para bajar el boot de ~70 ms a <10-15 ms. Solo si rinde, WASM gana en seguridad *y* velocidad manteniendo Python. Plan B: subprocess+rlimit interino (ya hecho) + WASM solo cuando el aislamiento sea requisito de venta.
 - [x] Análisis estático real al compilar: gate 2b con **Bandit** (SAST), como complemento del blocklist. Opcional — si no está instalado, se saltea con aviso (`validator.gate_2b_bandit`).
-- [ ] **Limitación honesta pendiente:** aislamiento de RED. En macOS no hay namespaces; hoy la red se corta solo a nivel de blocklist estático (imports `socket/urllib/http/requests` prohibidos), no a nivel de OS. El corte real de red llega con WASM/microVM.
+- [ ] **Limitaciones honestas pendientes (requieren WASM/microVM):**
+  - *El gate es la defensa real; el executor solo NO es una jaula.* Si se ejecuta código que NO pasó el gate (llamando al executor directo), el rlimit **no** contiene escritura de archivos ni red en macOS. En el flujo del router el gate bloquea, pero no confiar en el executor como contención.
+  - *Memoria:* `RLIMIT_AS/DATA` no se aplican en macOS → un artifact puede agotar RAM con Python puro (sin imports). Contenido solo por CPU-time y wall-timeout.
+  - *Red:* sin namespaces en macOS; hoy se corta solo por el allowlist de imports, no a nivel OS.
+- [ ] **Deuda encontrada de paso:** `vendor_deps` tiene `.so` nativos que `.gitignore` (`*.so`) excluye → un clone/CI/worktree/Docker no puede importar `pydantic_core`. Definir estrategia de deps (no vendorizar binarios, o instalarlas en build).
 
 ### Fase 3 — LLM real + validación por ejemplos
 Cerrar el loop de compilación con rigor (idea robada de PROSE/FlashFill: exigir generalización, no que pase 1 ejemplo).

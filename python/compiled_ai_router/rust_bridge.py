@@ -30,27 +30,37 @@ logger = logging.getLogger(__name__)
 # NO es aislamiento fuerte (para eso: WASM/microVM), pero acota daño y runaway.
 _LIMIT_CPU_SECONDS = 10        # tiempo de CPU (no wall) del artifact
 _LIMIT_ADDRESS_SPACE = 512 * 1024 * 1024   # 512 MB de memoria (best-effort en macOS)
+_LIMIT_DATA = 512 * 1024 * 1024            # heap (RLIMIT_DATA), complemento de RLIMIT_AS
 _LIMIT_FILE_SIZE = 10 * 1024 * 1024        # 10 MB máx de archivo escrito
 _LIMIT_OPEN_FILES = 64
+_LIMIT_PROCESSES = 64          # tope de procesos: mitiga fork bombs (best-effort)
 _WALL_TIMEOUT_SECONDS = 30
 
 
 def _apply_resource_limits():
-    """preexec_fn: aplica rlimits en el proceso hijo antes de exec (POSIX)."""
+    """preexec_fn: aplica rlimits en el proceso hijo antes de exec (POSIX).
+
+    ADVERTENCIA (honesto): en macOS RLIMIT_AS/RLIMIT_DATA no se aplican de forma
+    confiable (memoria NO contenida) y RLIMIT_NPROC cuenta procesos de todo el
+    usuario. Estos límites son best-effort. La contención sólida de
+    memoria/procesos/FS/red requiere WASM/microVM (ver docs/ROADMAP.md D-2/D-3).
+    """
     if resource is None:
         return
     for res, soft in (
         (resource.RLIMIT_CPU, _LIMIT_CPU_SECONDS),
         (resource.RLIMIT_FSIZE, _LIMIT_FILE_SIZE),
         (resource.RLIMIT_NOFILE, _LIMIT_OPEN_FILES),
+        (getattr(resource, "RLIMIT_NPROC", None), _LIMIT_PROCESSES),
         (getattr(resource, "RLIMIT_AS", None), _LIMIT_ADDRESS_SPACE),
+        (getattr(resource, "RLIMIT_DATA", None), _LIMIT_DATA),
     ):
         if res is None:
             continue
         try:
             resource.setrlimit(res, (soft, soft))
         except (ValueError, OSError):
-            # Algunos límites (ej. RLIMIT_AS) no se aplican bien en macOS. Best-effort.
+            # Varios límites no se aplican bien en macOS. Best-effort.
             pass
 
 

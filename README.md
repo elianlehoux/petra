@@ -87,13 +87,15 @@ Running demo showcase...
 ### Validation Pipeline
 All generated code passes through validation gates before caching:
 1. Syntax validation (AST)
-2. Security static analysis (AST blocklist)
+2. Security static analysis (AST import **allowlist** + forbidden names/dunders)
 2b. SAST with Bandit (optional — skipped if not installed)
-3. Sandboxed test execution
+3. Sandboxed test execution (subprocess + rlimits + isolated interpreter)
 4. Output/semantic verification
 
-> ⚠️ El gate de seguridad actual es un blocklist de AST — **es evadible y no es un sandbox real**.
-> El aislamiento de ejecución de verdad (WASM / microVM) es la Fase 2 del [ROADMAP](docs/ROADMAP.md).
+> ⚠️ Estos gates son **defensa en profundidad, no una jaula**. El gate estático (allowlist)
+> es la defensa principal; el executor con rlimits acota runaway (CPU/timeout) pero **no**
+> aísla FS/red/memoria en macOS. El aislamiento real (WASM / microVM) es la Fase 2 del
+> [ROADMAP](docs/ROADMAP.md).
 
 ## Performance Model
 
