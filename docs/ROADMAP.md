@@ -52,12 +52,13 @@ Base para no engañarse con números falsos.
 - [x] `engine/` (Rust muerto) eliminado — ver D-1. Repo inicializado con git; el código quedó en el historial (`git show HEAD~1:engine/...`).
 - [ ] Seguridad mínima: CORS sin `allow_origins=["*"]`+credentials; bindear API a `127.0.0.1` por defecto.
 
-### Fase 1 — Medición honesta 🎯 (próximo paso recomendado)
+### Fase 1 — Medición honesta ✅ (código listo; falta correrlo con API key real)
 **Esto es lo que valida el negocio.** Sin números medidos no hay tesis ni pitch.
-- [ ] Latencia de passthrough **real** (medir una llamada LLM real, no `time.sleep(0.15)`).
-- [ ] Tokens y costo **reales** (de la respuesta del API + precio del modelo), no `len(prompt)//4`.
-- [ ] Instrumentar por tarea: latencia compilado vs passthrough, cache hit rate, tasa de drift/recompilación, costo acumulado, **break-even real**.
-- [ ] `benchmark` que corra un workload realista sobre **un vertical concreto** (ej. extracción de facturas) y escupa la tabla honesta.
+- [x] Latencia de passthrough **real**: `_passthrough` llama al LLM de verdad y mide (`sleep` eliminado; en demo queda flageado `measured=False`).
+- [x] Tokens y costo **reales**: `pricing.py` + `response.usage`; `len(prompt)//4` degradado a estimación explícita solo en demo.
+- [x] Instrumentar por tarea: latencia compilado vs passthrough, cache hit, `drift_events`/`recompilations`, costo, **break-even real** (`compile_cost / costo_por_request`).
+- [x] Comando `measure` sobre un vertical (extracción de facturas): baseline real → compila → N cache hits → vuelca JSON. Dashboard marca MEDIDO vs SIMULADO.
+- [ ] **Pendiente (requiere tu OK — gasta $ y sale a OpenAI):** correr `OPENAI_API_KEY=... python -m compiled_ai_router.cli measure` para obtener los primeros números REALES.
 - **Entregable:** primer número real de "cuánto ahorra esto en X". Con eso decidís si vale seguir.
 
 ### Fase 2 — Sandbox real

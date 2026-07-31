@@ -37,7 +37,12 @@ def main():
     # Benchmark
     bench_p = subparsers.add_parser("benchmark", help="Run benchmark")
     bench_p.add_argument("--iterations", type=int, default=100)
-    
+
+    # Measure (Fase 1: números honestos con baseline real de LLM)
+    measure_p = subparsers.add_parser("measure", help="Medir costo/latencia reales sobre un vertical")
+    measure_p.add_argument("--iterations", type=int, default=50)
+    measure_p.add_argument("--output", type=str, default="artifacts/measurement.json")
+
     # Demo
     subparsers.add_parser("demo", help="Run built-in demo")
     
@@ -79,7 +84,10 @@ def main():
         
     elif args.command == "demo" or args.command == "benchmark":
         asyncio.run(run_demo_benchmark(router, iterations=getattr(args, "iterations", 100)))
-        
+
+    elif args.command == "measure":
+        asyncio.run(run_measurement(router, iterations=args.iterations, output=args.output))
+
     else:
         parser.print_help()
 
@@ -104,6 +112,60 @@ async def run_demo_benchmark(router: CompiledAIRouter, iterations: int = 100):
         await router.route(TaskRequest(prompt=prompt, input_data=inp))
         
     print("\n" + generate_dashboard(router.get_metrics()))
+
+
+async def run_measurement(router: CompiledAIRouter, iterations: int = 50, output: str = "artifacts/measurement.json"):
+    """Fase 1 — medición honesta sobre un vertical concreto (extracción de facturas).
+
+    Paso A: establecer baseline REAL del LLM (force_passthrough → llamada real).
+    Paso B: compilar una vez + ejecutar N cache hits.
+    Paso C: volcar métricas medidas a JSON.
+
+    Con API key real, todos los números son medidos. En modo demo, quedan flageados
+    como simulados (measured=False) y sirven solo para ver la forma del reporte.
+    """
+    import json as _json
+
+    real = router._has_real_key()
+    print("🔬 MEDICIÓN — Compiled AI Router (Fase 1)\n")
+    if not real:
+        print("⚠️  Sin API key real (modo demo): los números serán SIMULADOS, no medidos.")
+        print("    Para números reales: exportá OPENAI_API_KEY (tiene costo $ y sale a OpenAI).\n")
+    else:
+        print(f"✅ API key detectada. Modelo: {router.config.LLM_MODEL}. Llamadas reales al LLM.\n")
+
+    # Vertical de prueba: extracción de facturas.
+    task = "Extract invoice id, amount and date from the text into JSON"
+    samples = [
+        {"text": "Invoice INV-9821 for $1,450.50 dated 2026-03-15"},
+        {"text": "INV-3310 total $89.00 on 2026-05-01"},
+        {"text": "Billing INV-7777 amount $12,999.99 date 2026-06-30"},
+    ]
+
+    # Paso A: baseline real del LLM (una llamada passthrough por sample).
+    print(f"Paso A: baseline LLM (passthrough real) sobre {len(samples)} inputs...")
+    for inp in samples:
+        await router.route(TaskRequest(prompt=task, input_data=inp, force_passthrough=True))
+
+    # Paso B: compilar una vez + N cache hits.
+    print(f"Paso B: compilar 1 vez + {iterations} ejecuciones cacheadas...")
+    await router.route(TaskRequest(prompt=task, input_data=samples[0]))  # compila
+    for i in range(iterations):
+        await router.route(TaskRequest(prompt=task, input_data=samples[i % len(samples)]))
+
+    metrics = router.get_metrics()
+    print("\n" + generate_dashboard(metrics))
+
+    # Paso C: volcar a JSON.
+    payload = metrics.model_dump()
+    payload["vertical"] = "invoice_extraction"
+    payload["iterations"] = iterations
+    with open(output, "w") as f:
+        _json.dump(payload, f, indent=2)
+    print(f"\n💾 Métricas guardadas en {output}")
+    if not metrics.measured:
+        print("⚠️  measured=False: estos números NO son una medición real.")
+
 
 if __name__ == "__main__":
     main()

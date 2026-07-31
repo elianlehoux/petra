@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 import json
 import hashlib
@@ -8,6 +9,7 @@ from typing import Optional
 import openai
 from .models import TaskRequest, CompiledArtifact
 from .validator import validate_script
+from . import pricing
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +120,7 @@ def compile_task(request: TaskRequest, api_key: str, model: str) -> CompiledArti
 
     try:
         client = openai.Client(api_key=api_key)
+        start = time.perf_counter()
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -126,12 +129,27 @@ def compile_task(request: TaskRequest, api_key: str, model: str) -> CompiledArti
             ],
             temperature=0.0
         )
+        compile_latency_ms = (time.perf_counter() - start) * 1000
         content = response.choices[0].message.content or ""
         if "```python" in content:
             script = content.split("```python")[1].split("```")[0].strip()
         else:
             script = content.strip()
-        
+
+        # Uso y costo REALES de la compilación (medidos, no estimados).
+        usage = getattr(response, "usage", None)
+        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+        compile_cost = pricing.cost_usd(model, prompt_tokens, completion_tokens)
+        artifact.metadata.update({
+            "measured": True,
+            "compile_model": model,
+            "compile_prompt_tokens": prompt_tokens,
+            "compile_completion_tokens": completion_tokens,
+            "compile_cost_usd": compile_cost,
+            "compile_latency_ms": compile_latency_ms,
+        })
+
         artifact.script_content = script
         valid, validation_results = validate_script(artifact.script_content, request.input_data, request.expected_output)
         artifact.validation_results = validation_results

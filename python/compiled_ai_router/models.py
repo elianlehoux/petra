@@ -20,6 +20,9 @@ class TaskResponse(BaseModel):
     cost_usd: float
     cost_saved_usd: float
     artifact_id: Optional[str] = None
+    # True = números medidos de una llamada real al LLM.
+    # False = estimados/simulados (modo demo, sin API key).
+    measured: bool = False
 
 class ValidationResult(BaseModel):
     passed: bool
@@ -44,9 +47,16 @@ class MetricsSummary(BaseModel):
     compiled_hits: int = 0
     compilations: int = 0
     passthroughs: int = 0
+    recompilations: int = 0       # artifacts recompilados por drift
+    drift_events: int = 0         # ejecuciones que fallaron sobre input real
     cache_hit_rate: float = 0.0
     total_tokens_saved: int = 0
     total_cost_saved_usd: float = 0.0
     avg_compiled_latency_ms: float = 0.0
     avg_passthrough_latency_ms: float = 0.0
+    avg_passthrough_tokens: float = 0.0   # baseline real por request (si se midió)
     speedup_factor: float = 0.0
+    # False si algún número viene de passthrough simulado (modo demo).
+    measured: bool = True
+    # Ejecuciones necesarias para amortizar el costo de compilar. None si no medido.
+    break_even_executions: Optional[float] = None
