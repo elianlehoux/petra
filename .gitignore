@@ -40,3 +40,6 @@ target/
 
 # App
 artifacts/
+
+# Subagent worktrees (transitorios)
+.claude/worktrees/

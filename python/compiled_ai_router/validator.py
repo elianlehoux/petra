@@ -10,9 +10,28 @@ from .models import ValidationResult
 
 logger = logging.getLogger(__name__)
 
-# Dangerous AST nodes/names for Security Gate
-FORBIDDEN_CALLS = {"eval", "exec", "__import__", "compile"}
+# Dangerous AST nodes/names for Security Gate.
+# NOTA: un blocklist de AST NO es un sandbox (ver docs/ROADMAP.md D-2). Es una
+# primera capa. El aislamiento real lo dan el rlimit del executor + (objetivo) WASM.
 FORBIDDEN_MODULES = {"os", "sys", "subprocess", "shutil", "socket", "http", "urllib", "requests", "ctypes", "importlib", "pathlib"}
+
+# Nombres builtin prohibidos, tanto como llamada como referencia (x = open; x(...)).
+# Se bloquea el camino de escape clásico: open, getattr/setattr, eval/exec, etc.
+FORBIDDEN_NAMES = {
+    "eval", "exec", "compile", "__import__", "open", "input", "breakpoint",
+    "getattr", "setattr", "delattr", "globals", "locals", "vars",
+    "memoryview", "__build_class__", "help", "exit", "quit",
+}
+
+# Dunders peligrosos: permiten navegar de un objeto inocente a builtins/os
+# (ej. ().__class__.__bases__[0].__subclasses__()).
+DANGEROUS_DUNDERS = {
+    "__class__", "__base__", "__bases__", "__mro__", "__subclasses__",
+    "__globals__", "__builtins__", "__code__", "__dict__", "__getattribute__",
+    "__subclasshook__", "__init_subclass__", "__import__", "__loader__",
+    "__spec__", "__closure__", "__func__", "__self__",
+}
+
 
 class SecurityVisitor(ast.NodeVisitor):
     def __init__(self):
@@ -33,15 +52,21 @@ class SecurityVisitor(ast.NodeVisitor):
                 self.violations.append(f"Forbidden module import: {node.module}")
         self.generic_visit(node)
 
-    def visit_Call(self, node: ast.Call):
-        if isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_CALLS:
-            self.violations.append(f"Forbidden function call: {node.func.id}")
-        elif isinstance(node.func, ast.Attribute):
-            if isinstance(node.func.value, ast.Name):
-                if node.func.value.id == "os" and node.func.attr in {"system", "popen", "exec", "remove", "rmdir"}:
-                    self.violations.append(f"Forbidden call: os.{node.func.attr}")
-                elif node.func.value.id == "sys" and node.func.attr not in {"stdin", "stdout", "stderr", "exit"}:
-                    self.violations.append(f"Forbidden sys attribute access: sys.{node.func.attr}")
+    def visit_Name(self, node: ast.Name):
+        # Bloquea referencia a builtins peligrosos, no solo la llamada directa.
+        if node.id in FORBIDDEN_NAMES:
+            self.violations.append(f"Forbidden name: {node.id}")
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute):
+        # Bloquea acceso a dunders peligrosos (camino de escape a builtins/os).
+        if node.attr in DANGEROUS_DUNDERS:
+            self.violations.append(f"Forbidden attribute access: {node.attr}")
+        elif isinstance(node.value, ast.Name):
+            if node.value.id == "os" and node.attr in {"system", "popen", "exec", "remove", "rmdir"}:
+                self.violations.append(f"Forbidden call: os.{node.attr}")
+            elif node.value.id == "sys" and node.attr not in {"stdin", "stdout", "stderr", "exit", "argv"}:
+                self.violations.append(f"Forbidden sys attribute access: sys.{node.attr}")
         self.generic_visit(node)
 
 def gate_1_syntax(script_content: str) -> ValidationResult:
@@ -69,6 +94,15 @@ def gate_2_security(script_content: str) -> ValidationResult:
     except Exception as e:
         dur = (time.perf_counter() - start) * 1000
         return ValidationResult(passed=False, gate_name="2_security", message=f"Security scan error: {e}", duration_ms=dur)
+
+def security_check(script_content: str) -> Tuple[bool, str]:
+    """Re-chequeo de seguridad rápido para runtime (defensa de artifacts alterados en disco).
+
+    Corre el mismo gate estático que la compilación. Devuelve (ok, mensaje).
+    """
+    r = gate_2_security(script_content)
+    return r.passed, r.message
+
 
 def gate_3_sandbox(script_content: str, sample_input: Optional[Any] = None) -> ValidationResult:
     """Gate 3: Sandboxed Test Execution"""

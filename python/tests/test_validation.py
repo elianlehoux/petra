@@ -34,7 +34,22 @@ def test_security_gate_fail_forbidden_call():
     script = "eval('1 + 1')"
     res = gate_2_security(script)
     assert res.passed is False
-    assert "Forbidden function call" in res.message
+    assert "eval" in res.message
+
+def test_security_gate_blocks_open():
+    # 'open' habilita lectura/escritura arbitraria de archivos: prohibido.
+    res = gate_2_security("f = open('/etc/passwd')")
+    assert res.passed is False
+    assert "open" in res.message
+
+def test_security_gate_blocks_dunder_escape():
+    # Camino de escape clásico a builtins/os via dunders.
+    res = gate_2_security("x = ().__class__.__bases__[0].__subclasses__()")
+    assert res.passed is False
+
+def test_security_gate_blocks_getattr_bypass():
+    res = gate_2_security("getattr(__builtins__, 'ev' + 'al')('1')")
+    assert res.passed is False
 
 def test_sandbox_gate_pass():
     script = "import json, sys\ndata = json.loads(sys.stdin.read() or '{}')\nprint(json.dumps({'echo': data}))"

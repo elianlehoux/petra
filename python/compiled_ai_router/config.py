@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     TOKEN_COST_OUTPUT: float = 0.0006
     RUST_ENGINE_PATH: Optional[str] = None
     MAX_EXECUTION_TIMEOUT: int = 30
-    API_HOST: str = "0.0.0.0"
+    # Default local seguro. En contenedor/despliegue, setear API_HOST=0.0.0.0.
+    API_HOST: str = "127.0.0.1"
     API_PORT: int = 8080
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

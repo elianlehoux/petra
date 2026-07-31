@@ -10,13 +10,48 @@ en un runtime WASM embebido (wasmtime) — ahí sí Rust cobra sentido como host
 Hasta entonces, esta clase es un ejecutor local honesto y directo.
 """
 
+import os
+import sys
 import subprocess
+import tempfile
 import time
 import hashlib
 import logging
 from typing import Optional, Tuple
 
+try:
+    import resource  # POSIX only
+except ImportError:  # pragma: no cover - Windows
+    resource = None
+
 logger = logging.getLogger(__name__)
+
+# Límites del sandbox de ejecución (interino, ver docs/ROADMAP.md Fase 2).
+# NO es aislamiento fuerte (para eso: WASM/microVM), pero acota daño y runaway.
+_LIMIT_CPU_SECONDS = 10        # tiempo de CPU (no wall) del artifact
+_LIMIT_ADDRESS_SPACE = 512 * 1024 * 1024   # 512 MB de memoria (best-effort en macOS)
+_LIMIT_FILE_SIZE = 10 * 1024 * 1024        # 10 MB máx de archivo escrito
+_LIMIT_OPEN_FILES = 64
+_WALL_TIMEOUT_SECONDS = 30
+
+
+def _apply_resource_limits():
+    """preexec_fn: aplica rlimits en el proceso hijo antes de exec (POSIX)."""
+    if resource is None:
+        return
+    for res, soft in (
+        (resource.RLIMIT_CPU, _LIMIT_CPU_SECONDS),
+        (resource.RLIMIT_FSIZE, _LIMIT_FILE_SIZE),
+        (resource.RLIMIT_NOFILE, _LIMIT_OPEN_FILES),
+        (getattr(resource, "RLIMIT_AS", None), _LIMIT_ADDRESS_SPACE),
+    ):
+        if res is None:
+            continue
+        try:
+            resource.setrlimit(res, (soft, soft))
+        except (ValueError, OSError):
+            # Algunos límites (ej. RLIMIT_AS) no se aplican bien en macOS. Best-effort.
+            pass
 
 
 class LocalExecutor:
@@ -33,14 +68,21 @@ class LocalExecutor:
 
     def execute_artifact(self, script_path: str, input_data: str) -> Tuple[Optional[str], float]:
         start = time.perf_counter()
+        # Entorno mínimo + intérprete aislado (-I: ignora PYTHON*, user site, cwd import).
+        env = {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "LANG": "C"}
+        preexec = _apply_resource_limits if resource is not None else None
         try:
-            proc = subprocess.run(
-                ["python3", script_path],
-                input=input_data,
-                text=True,
-                capture_output=True,
-                timeout=30,
-            )
+            with tempfile.TemporaryDirectory(prefix="carouter_exec_") as workdir:
+                proc = subprocess.run(
+                    [sys.executable, "-I", script_path],
+                    input=input_data,
+                    text=True,
+                    capture_output=True,
+                    timeout=_WALL_TIMEOUT_SECONDS,
+                    cwd=workdir,           # cwd descartable, no el del proyecto
+                    env=env,
+                    preexec_fn=preexec,    # rlimits (POSIX)
+                )
             duration_ms = (time.perf_counter() - start) * 1000
             if proc.returncode != 0:
                 logger.error(f"Script execution failed: {proc.stderr}")
@@ -48,7 +90,7 @@ class LocalExecutor:
             return proc.stdout.strip(), duration_ms
         except subprocess.TimeoutExpired:
             logger.error("Script execution timed out")
-            return None, 30000.0
+            return None, _WALL_TIMEOUT_SECONDS * 1000.0
         except Exception as e:
             logger.error(f"Script execution error: {e}")
             return None, 0.0

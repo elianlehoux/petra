@@ -11,6 +11,7 @@ from .config import Settings
 from .similarity import find_similar_artifact
 from .compiler import compile_task
 from .rust_bridge import RustEngine
+from .validator import security_check
 from . import pricing
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,13 @@ class CompiledAIRouter:
 
     def execute_artifact(self, artifact: CompiledArtifact, input_data: Any) -> Tuple[Any, float, bool]:
         """Executes a compiled artifact. Returns (output, duration_ms, success)."""
+        # Re-chequeo de seguridad en RUNTIME (no solo al compilar): defiende contra
+        # artifacts alterados en disco. Ver docs/ROADMAP.md D-2 / Fase 2.
+        ok, msg = security_check(artifact.script_content)
+        if not ok:
+            logger.error(f"Artifact {artifact.id} rechazado por seguridad en runtime: {msg}")
+            return {"error": f"security check failed: {msg}"}, 0.0, False
+
         script_path = os.path.join(self.config.ARTIFACT_DIR, f"{artifact.id}.py")
         if not os.path.exists(script_path):
             with open(script_path, 'w') as f:

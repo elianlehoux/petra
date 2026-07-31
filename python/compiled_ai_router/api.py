@@ -9,10 +9,12 @@ from .config import settings
 
 app = FastAPI(title="Compiled AI Router API")
 
+# allow_origins=["*"] junto con allow_credentials=True es inválido/inseguro.
+# La UI se sirve del mismo origen, así que no hacen falta credenciales cross-origin.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

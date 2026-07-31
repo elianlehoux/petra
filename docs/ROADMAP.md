@@ -76,10 +76,13 @@ Base para no engañarse con números falsos.
 
 ### Fase 2 — Sandbox real
 Bloqueante técnico #1. El fix de velocidad y el de seguridad son el mismo problema (eliminar el spawn).
-- [ ] **Interino (bajo esfuerzo):** subprocess + `resource.setrlimit` (CPU/memoria) + sin red + timeout, y **revalidar SIEMPRE en runtime**, no solo al compilar.
-- [ ] Cerrar los bypass del gate estático actual (`open`, `getattr`, dunders, `__builtins__`) — como complemento, no como única defensa.
-- [ ] **Objetivo:** PoC de ejecución en **WASM (wasmtime)** — mide latencia real sin spawn y da aislamiento por diseño (WASI capabilities + fuel).
+- [x] **Interino:** ejecución con `resource.setrlimit` (CPU 10s, memoria 512MB best-effort, file 10MB, fds 64) + intérprete aislado `python -I` + env mínimo + cwd temporal + timeout wall 30s (`rust_bridge.py`).
+- [x] **Revalidar SIEMPRE en runtime**: `security_check` corre antes de ejecutar cualquier artifact (defiende artifacts alterados en disco), no solo al compilar (`router.execute_artifact`).
+- [x] Cerrar bypasses del gate estático: `open`, `getattr/setattr/delattr`, `globals/locals/vars`, y acceso a dunders peligrosos (`__class__`, `__bases__`, `__subclasses__`, `__globals__`, `__builtins__`, …). Bloqueo a nivel de nombre y de atributo (`validator.py`). Tests nuevos cubren cada bypass.
+- [x] Seguridad de API: CORS sin `allow_origins=*`+credentials; `API_HOST` default `127.0.0.1` (contenedor setea `0.0.0.0`).
+- [ ] **Objetivo:** PoC de ejecución en **WASM (wasmtime)** — mide latencia real sin spawn y da aislamiento por diseño (WASI capabilities + fuel). *(Spike de factibilidad en curso vía subagente → `docs/wasm-sandbox-spike.md`.)*
 - [ ] Análisis estático de verdad al compilar (Bandit/Semgrep) en vez del blocklist casero.
+- [ ] **Limitación honesta pendiente:** aislamiento de RED. En macOS no hay namespaces; hoy la red se corta solo a nivel de blocklist estático (imports `socket/urllib/http/requests` prohibidos), no a nivel de OS. El corte real de red llega con WASM/microVM.
 
 ### Fase 3 — LLM real + validación por ejemplos
 Cerrar el loop de compilación con rigor (idea robada de PROSE/FlashFill: exigir generalización, no que pase 1 ejemplo).
