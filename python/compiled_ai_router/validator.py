@@ -1,4 +1,5 @@
 import ast
+import os
 import json
 import time
 import subprocess
@@ -95,6 +96,65 @@ def gate_2_security(script_content: str) -> ValidationResult:
         dur = (time.perf_counter() - start) * 1000
         return ValidationResult(passed=False, gate_name="2_security", message=f"Security scan error: {e}", duration_ms=dur)
 
+_BANDIT_AVAILABLE: Optional[bool] = None
+
+
+def _bandit_available() -> bool:
+    """Detecta (y cachea) si Bandit está instalado."""
+    global _BANDIT_AVAILABLE
+    if _BANDIT_AVAILABLE is None:
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "bandit", "--version"],
+                capture_output=True, text=True, timeout=10,
+            )
+            _BANDIT_AVAILABLE = proc.returncode == 0
+        except Exception:
+            _BANDIT_AVAILABLE = False
+    return _BANDIT_AVAILABLE
+
+
+def gate_2b_bandit(script_content: str) -> ValidationResult:
+    """Gate 2b: análisis estático real con Bandit (SAST).
+
+    Complementa al blocklist de AST (que es fácil de evadir). Si Bandit no está
+    instalado, se SALTEA con un aviso claro (no bloquea el flujo). Falla si Bandit
+    reporta issues de severidad MEDIUM o HIGH.
+    """
+    start = time.perf_counter()
+    if not _bandit_available():
+        dur = (time.perf_counter() - start) * 1000
+        return ValidationResult(passed=True, gate_name="2b_bandit",
+                                message="Bandit no instalado — gate salteado (pip install bandit para SAST real)",
+                                duration_ms=dur)
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        f.write(script_content)
+        temp_path = f.name
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "bandit", "-f", "json", "-q", temp_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        dur = (time.perf_counter() - start) * 1000
+        try:
+            report = json.loads(proc.stdout or "{}")
+        except Exception:
+            return ValidationResult(passed=True, gate_name="2b_bandit",
+                                    message="Bandit sin salida parseable — gate salteado", duration_ms=dur)
+        results = report.get("results", [])
+        blocking = [r for r in results if r.get("issue_severity") in ("MEDIUM", "HIGH")]
+        if blocking:
+            msgs = ", ".join(f"{r.get('test_id')}:{r.get('issue_text', '')[:50]}" for r in blocking[:3])
+            return ValidationResult(passed=False, gate_name="2b_bandit",
+                                    message=f"Bandit: {len(blocking)} issue(s) MEDIUM/HIGH: {msgs}", duration_ms=dur)
+        return ValidationResult(passed=True, gate_name="2b_bandit",
+                                message=f"Bandit OK ({len(results)} hallazgos bajos/nulos)", duration_ms=dur)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
 def security_check(script_content: str) -> Tuple[bool, str]:
     """Re-chequeo de seguridad rápido para runtime (defensa de artifacts alterados en disco).
 
@@ -190,6 +250,11 @@ def validate_script(script_content: str, sample_input: Optional[Any] = None, exp
     r2 = gate_2_security(script_content)
     results.append(r2)
     if not r2.passed:
+        return False, results
+
+    r2b = gate_2b_bandit(script_content)
+    results.append(r2b)
+    if not r2b.passed:
         return False, results
 
     r3 = gate_3_sandbox(script_content, sample_input)

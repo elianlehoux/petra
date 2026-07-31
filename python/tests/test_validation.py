@@ -51,6 +51,13 @@ def test_security_gate_blocks_getattr_bypass():
     res = gate_2_security("getattr(__builtins__, 'ev' + 'al')('1')")
     assert res.passed is False
 
+def test_bandit_gate_graceful_and_clean():
+    # Script limpio: pasa igual esté o no instalado Bandit (si no está, se saltea).
+    from compiled_ai_router.validator import gate_2b_bandit
+    res = gate_2b_bandit("import json, sys\nprint(json.dumps({'ok': True}))")
+    assert res.passed is True
+    assert res.gate_name == "2b_bandit"
+
 def test_sandbox_gate_pass():
     script = "import json, sys\ndata = json.loads(sys.stdin.read() or '{}')\nprint(json.dumps({'echo': data}))"
     res = gate_3_sandbox(script, sample_input={"key": "value"})
@@ -83,7 +90,7 @@ def test_full_pipeline_pass():
     script = "import json, sys\nprint(json.dumps({'result': 'success'}))"
     valid, results = validate_script(script)
     assert valid is True
-    assert len(results) == 4
+    assert len(results) == 5  # syntax, security, bandit, sandbox, semantic
 
 def test_full_pipeline_reject_malicious():
     script = "import subprocess\nsubprocess.run(['ls'])"

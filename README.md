@@ -83,9 +83,10 @@ Running demo showcase...
 3. **Artifact Creation**: Saves the executable logic to disk.
 
 ### Validation Pipeline
-All generated code passes through 4 gates before caching:
+All generated code passes through validation gates before caching:
 1. Syntax validation (AST)
-2. Security static analysis
+2. Security static analysis (AST blocklist)
+2b. SAST with Bandit (optional — skipped if not installed)
 3. Sandboxed test execution
 4. Output/semantic verification
 

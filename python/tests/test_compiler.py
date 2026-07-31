@@ -14,5 +14,5 @@ def test_compile_task_demo_mode():
     artifact = compile_task(req, api_key="demo", model="gpt-4o-mini")
     assert artifact.task_type == "extraction"
     assert "re.search" in artifact.script_content
-    assert len(artifact.validation_results) == 4
+    assert len(artifact.validation_results) == 5  # +gate 2b (bandit)
     assert all(vr.passed for vr in artifact.validation_results)

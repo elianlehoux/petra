@@ -82,7 +82,7 @@ Bloqueante técnico #1. El fix de velocidad y el de seguridad son el mismo probl
 - [x] Seguridad de API: CORS sin `allow_origins=*`+credentials; `API_HOST` default `127.0.0.1` (contenedor setea `0.0.0.0`).
 - [x] **Spike WASM completado** ([`docs/wasm-sandbox-spike.md`](wasm-sandbox-spike.md), prototipo en `spike/`): `WasmExecutor` con la misma firma que `LocalExecutor` corre un artifact real sin modificarlo, aislado (fs/red denegados, fuel corta bucles infinitos). **Conclusión:** aislamiento real y barato, pero Python-en-WASM naive es ~2× más lento que el subprocess → ver D-3.
 - [ ] **Siguiente decisión (WASM):** spike de **Wizer** (pre-init de `python.wasm`) para bajar el boot de ~70 ms a <10-15 ms. Solo si rinde, WASM gana en seguridad *y* velocidad manteniendo Python. Plan B: subprocess+rlimit interino (ya hecho) + WASM solo cuando el aislamiento sea requisito de venta.
-- [ ] Análisis estático de verdad al compilar (Bandit/Semgrep) en vez del blocklist casero.
+- [x] Análisis estático real al compilar: gate 2b con **Bandit** (SAST), como complemento del blocklist. Opcional — si no está instalado, se saltea con aviso (`validator.gate_2b_bandit`).
 - [ ] **Limitación honesta pendiente:** aislamiento de RED. En macOS no hay namespaces; hoy la red se corta solo a nivel de blocklist estático (imports `socket/urllib/http/requests` prohibidos), no a nivel de OS. El corte real de red llega con WASM/microVM.
 
 ### Fase 3 — LLM real + validación por ejemplos
