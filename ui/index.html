@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Compiled AI Router — Agent Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="logo-container">
+      <div class="logo-icon">⚡</div>
+      <div class="logo-text">
+        <h1>Compiled AI Router</h1>
+        <span>Agent Manager & Compiler Gateway</span>
+      </div>
+    </div>
+    
+    <div class="nav-status">
+      <div class="status-badge">
+        <span class="status-dot"></span>
+        Runtime Engine Active (0 LLM Calls on Cache)
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Grid -->
+  <div class="main-container">
+    
+    <!-- Sidebar Navigation & Config -->
+    <aside class="sidebar">
+      <div class="nav-card">
+        <h3>Menu</h3>
+        <ul class="nav-menu">
+          <li class="nav-item active">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            Router Sandbox
+          </li>
+          <li class="nav-item">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+            Compiled Blueprints
+          </li>
+          <li class="nav-item">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            Metrics & Analytics
+          </li>
+        </ul>
+      </div>
+
+      <!-- AI Provider Selector -->
+      <div class="nav-card">
+        <h3>Model Provider</h3>
+        <div class="provider-box">
+          <div class="form-group">
+            <label for="providerSelect">Select Provider</label>
+            <select id="providerSelect" class="form-select">
+              <option value="openai">OpenAI (GPT-4o / gpt-4o-mini)</option>
+              <option value="anthropic">Anthropic (Claude 3.5 Sonnet)</option>
+              <option value="deepseek">DeepSeek (V3 / R1)</option>
+              <option value="ollama">Ollama (Local Qwen2.5 / Llama3 - $0)</option>
+              <option value="groq">Groq (Ultra-fast Llama)</option>
+              <option value="openrouter">OpenRouter (Multi-model Router)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="apiKey">API Key / Endpoint</label>
+            <input type="password" id="apiKey" class="form-input" placeholder="sk-... or http://localhost:11434" value="demo-mode">
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="content-area">
+
+      <!-- Metrics Summary Header Grid -->
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-title">Total Requests</span>
+            <div class="metric-icon cyan">📊</div>
+          </div>
+          <div class="metric-value" id="mTotalReq">24</div>
+          <div class="metric-subtext">Processed by Router Gateway</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-title">Cache Hit Rate</span>
+            <div class="metric-icon emerald">⚡</div>
+          </div>
+          <div class="metric-value" id="mCacheHit" style="color: var(--accent-emerald);">87.0%</div>
+          <div class="metric-subtext">Executed on Runtime ($0 LLM)</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-title">Tokens Saved</span>
+            <div class="metric-icon violet">💎</div>
+          </div>
+          <div class="metric-value" id="mTokensSaved" style="color: var(--accent-violet);">2,148</div>
+          <div class="metric-subtext">Avoided LLM Re-inferences</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-title">Est. Cost Saved</span>
+            <div class="metric-icon amber">💰</div>
+          </div>
+          <div class="metric-value" id="mCostSaved" style="color: var(--accent-amber);">$0.322</div>
+          <div class="metric-subtext">Direct Token Savings</div>
+        </div>
+      </div>
+
+      <!-- Router Interactive Sandbox Section -->
+      <div class="section-card">
+        <div class="section-header">
+          <div class="section-title">
+            <span>⚡ Interactive Router Sandbox</span>
+          </div>
+          <span style="font-size: 0.8rem; color: var(--text-muted);">Try pre-built tasks or type custom instructions</span>
+        </div>
+
+        <div class="sandbox-grid">
+          <!-- Input Column -->
+          <div>
+            <div class="templates-bar">
+              <span style="font-size: 0.78rem; color: var(--text-muted); align-self: center;">Quick Templates:</span>
+              <button class="template-btn" onclick="loadTemplate('invoice')">📄 Invoice Parser</button>
+              <button class="template-btn" onclick="loadTemplate('transform')">🔄 CSV/Array Converter</button>
+              <button class="template-btn" onclick="loadTemplate('scrape')">🌐 HTML Price Scraper</button>
+              <button class="template-btn" onclick="loadTemplate('passthrough')">💬 Chat Passthrough</button>
+            </div>
+
+            <div class="form-group" style="margin-top: 10px;">
+              <label>Task Prompt (Natural Language)</label>
+              <textarea id="promptInput" class="prompt-input" placeholder="e.g. Extract invoice number, total amount, and date into structured JSON">Extract invoice number, total amount, and date into structured JSON</textarea>
+            </div>
+
+            <div class="form-group" style="margin-top: 10px;">
+              <label>Input Data (JSON payload sent to runtime execution)</label>
+              <textarea id="inputData" class="input-data-box">{
+  "text": "Invoice INV-2026-889 for $1,250.00 dated 2026-07-20"
+}</textarea>
+            </div>
+
+            <div class="action-bar">
+              <button class="btn-primary" onclick="sendRouteRequest(false)">
+                <span>⚡ Send Request (Smart Route)</span>
+              </button>
+              <button class="btn-secondary" onclick="sendRouteRequest(true)">
+                🔨 Force Re-Compile
+              </button>
+            </div>
+          </div>
+
+          <!-- Output Column -->
+          <div>
+            <div class="form-group">
+              <label>Execution Output & Metrics</label>
+              <div id="consoleOutput" class="console-box">
+                <span style="color: var(--text-muted);">Console ready. Click "Send Request" to test the router execution path.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Compiled Blueprints / Artifacts List Section -->
+      <div class="section-card">
+        <div class="section-header">
+          <div class="section-title">
+            <span>📦 Compiled Artifacts Repository</span>
+          </div>
+          <span style="font-size: 0.8rem; color: var(--text-muted);">Static Python blueprints compiled once & executed deterministically</span>
+        </div>
+
+        <table class="artifacts-table">
+          <thead>
+            <tr>
+              <th>Artifact ID</th>
+              <th>Task Type</th>
+              <th>Original Prompt</th>
+              <th>Executions</th>
+              <th>Avg Latency</th>
+            </tr>
+          </thead>
+          <tbody id="artifactsBody">
+            <!-- Populated via JavaScript -->
+          </tbody>
+        </table>
+      </div>
+
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

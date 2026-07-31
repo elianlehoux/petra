@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Extract Email Fields",
+    "request": {
+      "prompt": "Extract sender, recipient, subject, date, and body from this email",
+      "input_data": {"text": "From: john@example.com\nTo: jane@example.com\nSubject: Q3 Report\nDate: 2024-03-15\n\nPlease find attached the Q3 report."},
+      "task_type": "extraction"
+    }
+  },
+  {
+    "name": "CSV to JSON",
+    "request": {
+      "prompt": "Convert this CSV data to JSON records",
+      "input_data": {"csv_data": "name,age,city\nAlice,30,NYC\nBob,25,LA"},
+      "task_type": "transformation"
+    }
+  },
+  {
+    "name": "Invoice Extraction",
+    "request": {
+      "prompt": "Extract structured data from this invoice text",
+      "input_data": {"text": "INVOICE #INV-2024-001\nDate: January 15, 2024\nBill To: Acme Corporation\n123 Business St, Suite 100\nNew York, NY 10001\n\nItem: Software License - $5,000.00\nItem: Support Package - $1,200.00\nItem: Training (2 days) - $3,000.00\n\nSubtotal: $9,200.00\nTax (8%): $736.00\nTotal: $9,936.00"},
+      "task_type": "extraction"
+    }
+  }
+]

@@ -1,0 +1,13 @@
+version: '3.8'
+services:
+  router:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./artifacts:/app/artifacts
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - ARTIFACT_DIR=/app/artifacts
+      - API_PORT=8080
