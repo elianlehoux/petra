@@ -48,7 +48,8 @@ Base para no engañarse con números falsos.
 - [x] `Makefile` apuntando a comandos reales (antes referenciaba módulos inexistentes).
 - [x] `examples/benchmark.sh` falso reemplazado por el benchmark real de la CLI.
 - [x] `rust_bridge.py` limpiado: sin la pantomima de cargar una lib de Rust que nunca se usa.
-- [ ] **Pendiente de confirmación:** eliminar `engine/` (Rust) — ver D-1. Requiere tu OK porque no es repo git (borrado irreversible).
+- [x] `Dockerfile` reescrito (no compilaba: buscaba `Cargo.toml` en la raíz y arrancaba un módulo inexistente).
+- [x] `engine/` (Rust muerto) eliminado — ver D-1. Repo inicializado con git; el código quedó en el historial (`git show HEAD~1:engine/...`).
 - [ ] Seguridad mínima: CORS sin `allow_origins=["*"]`+credentials; bindear API a `127.0.0.1` por defecto.
 
 ### Fase 1 — Medición honesta 🎯 (próximo paso recomendado)
