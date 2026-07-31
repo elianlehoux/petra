@@ -1,0 +1,5 @@
+venv/
+wasm/python.wasm
+wasm/python.cwasm
+wasm/hello.py
+__pycache__/
