@@ -11,10 +11,21 @@ from .models import ValidationResult
 
 logger = logging.getLogger(__name__)
 
-# Dangerous AST nodes/names for Security Gate.
-# NOTA: un blocklist de AST NO es un sandbox (ver docs/ROADMAP.md D-2). Es una
-# primera capa. El aislamiento real lo dan el rlimit del executor + (objetivo) WASM.
-FORBIDDEN_MODULES = {"os", "sys", "subprocess", "shutil", "socket", "http", "urllib", "requests", "ctypes", "importlib", "pathlib"}
+# Static security gate.
+# NOTA: esto NO es un sandbox (ver docs/ROADMAP.md D-2). Es defensa en profundidad,
+# no una jaula. El aislamiento real (FS/red/procesos) lo da WASM/microVM (objetivo).
+#
+# ALLOWLIST de imports (no blocklist): un blocklist es whack-a-mole — `import posix`
+# ES `os`, `import _socket` ES red, `import builtins` reexpone `open`/`eval`, etc.
+# Solo se permiten módulos de stdlib seguros y sin I/O de red/FS/proceso.
+ALLOWED_MODULES = {
+    "sys",  # solo sys.stdin/stdout/stderr/exit/argv (ver visit_Attribute)
+    "json", "re", "math", "cmath", "decimal", "fractions", "random", "statistics",
+    "string", "textwrap", "datetime", "time", "calendar", "zoneinfo",
+    "collections", "itertools", "functools", "operator", "heapq", "bisect", "copy",
+    "typing", "dataclasses", "enum", "numbers", "unicodedata",
+    "base64", "binascii", "hashlib", "hmac", "uuid", "struct", "html",
+}
 
 # Nombres builtin prohibidos, tanto como llamada como referencia (x = open; x(...)).
 # Se bloquea el camino de escape clásico: open, getattr/setattr, eval/exec, etc.
@@ -41,16 +52,17 @@ class SecurityVisitor(ast.NodeVisitor):
     def visit_Import(self, node: ast.Import):
         for alias in node.names:
             module_name = alias.name.split('.')[0]
-            # Allow sys ONLY for sys.stdin and sys.stdout
-            if module_name in FORBIDDEN_MODULES and module_name != "sys":
-                self.violations.append(f"Forbidden module import: {alias.name}")
+            if module_name not in ALLOWED_MODULES:
+                self.violations.append(f"Forbidden module import: {alias.name} (no está en el allowlist)")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom):
-        if node.module:
-            module_name = node.module.split('.')[0]
-            if module_name in FORBIDDEN_MODULES and module_name != "sys":
-                self.violations.append(f"Forbidden module import: {node.module}")
+        # Import relativo (from . import x) o sin módulo: prohibido.
+        if node.level and node.level > 0:
+            self.violations.append("Forbidden relative import")
+        module_name = (node.module or "").split('.')[0]
+        if module_name not in ALLOWED_MODULES:
+            self.violations.append(f"Forbidden module import: {node.module} (no está en el allowlist)")
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name):

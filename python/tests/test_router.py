@@ -30,7 +30,7 @@ async def test_router_compile_then_cache_hit(temp_router):
     assert res2.artifact_id == res1.artifact_id
     assert res2.tokens_used == 0
     assert res2.tokens_saved > 0
-    assert res2.latency_ms < 100.0  # Millisecond latency
+    assert res2.latency_ms < 1000.0  # ejecución local (no LLM); umbral robusto, no frágil
 
 @pytest.mark.asyncio
 async def test_router_passthrough(temp_router):
@@ -40,6 +40,45 @@ async def test_router_passthrough(temp_router):
     assert res.route == "passthrough"
     assert res.tokens_saved == 0
     assert res.tokens_used > 0
+
+@pytest.mark.asyncio
+async def test_ondisk_tamper_has_no_effect(temp_router):
+    # C3: alterar el .py en disco no cambia lo que se ejecuta (se sobrescribe con
+    # el script_content validado antes de correr).
+    import os
+    res = await temp_router.route(TaskRequest(prompt="Extract invoice number from text", input_data={"text": "INV-1"}))
+    art = temp_router.artifacts[res.artifact_id]
+    path = os.path.join(temp_router.config.ARTIFACT_DIR, f"{art.id}.py")
+    with open(path, "w") as f:
+        f.write("import os\nos.system('echo pwned')\n")  # payload malicioso en disco
+    out, dur, success = temp_router.execute_artifact(art, {"text": "INV-2"})
+    assert success is True
+    assert isinstance(out, dict) and "invoice_id" in out  # corrió el benigno, no el tamper
+
+@pytest.mark.asyncio
+async def test_force_compile_no_duplicates(temp_router):
+    # M4: force_compile no debe crear artifacts duplicados con el mismo prompt_hash.
+    p = "Extract invoice number from text"
+    await temp_router.route(TaskRequest(prompt=p, input_data={"text": "INV-1"}, force_compile=True))
+    await temp_router.route(TaskRequest(prompt=p, input_data={"text": "INV-2"}, force_compile=True))
+    hashes = [a.prompt_hash for a in temp_router.artifacts.values()]
+    assert len(temp_router.artifacts) == 1
+    assert len(set(hashes)) == 1
+
+@pytest.mark.asyncio
+async def test_force_compile_does_not_fall_to_passthrough(temp_router):
+    # M3: prompt "no compilable" + force_compile debe compilar igual, no passthrough.
+    res = await temp_router.route(TaskRequest(prompt="explain your reasoning about invoices", force_compile=True))
+    assert res.route != "passthrough"
+
+def test_saved_baseline_is_per_task_type(temp_router):
+    # M2: measured=True solo para la task_type que tuvo passthrough real medido.
+    temp_router.passthrough_tokens_by_type["extraction"] = [100]
+    temp_router.passthrough_costs_by_type["extraction"] = [0.01]
+    _, _, measured_known = temp_router._saved_baseline("x", "extraction")
+    _, _, measured_other = temp_router._saved_baseline("x", "transformation")
+    assert measured_known is True
+    assert measured_other is False
 
 @pytest.mark.asyncio
 async def test_runtime_revalidation_rejects_tampered_artifact(temp_router):

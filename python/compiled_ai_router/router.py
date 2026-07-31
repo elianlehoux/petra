@@ -9,7 +9,7 @@ import openai
 from .models import TaskRequest, TaskResponse, CompiledArtifact, MetricsSummary
 from .config import Settings
 from .similarity import find_similar_artifact
-from .compiler import compile_task
+from .compiler import compile_task, detect_task_type
 from .rust_bridge import RustEngine
 from .validator import security_check
 from . import pricing
@@ -33,6 +33,10 @@ class CompiledAIRouter:
         self.compiled_latencies: List[float] = []
         self.passthrough_tokens: List[int] = []   # baseline real de tokens por request
         self.passthrough_costs: List[float] = []   # baseline real de costo por request
+        # Baseline por task_type: el ahorro de un cache hit solo es "medido" si esa
+        # MISMA clase de tarea tuvo un passthrough real (no un promedio global cruzado).
+        self.passthrough_tokens_by_type: Dict[str, List[int]] = {}
+        self.passthrough_costs_by_type: Dict[str, List[float]] = {}
         self.compile_costs: List[float] = []       # costo real de cada compilación
         self.any_simulated = False                 # True si hubo passthrough simulado
 
@@ -89,10 +93,13 @@ class CompiledAIRouter:
             logger.error(f"Artifact {artifact.id} rechazado por seguridad en runtime: {msg}")
             return {"error": f"security check failed: {msg}"}, 0.0, False
 
+        # Escribir SIEMPRE el contenido validado justo antes de ejecutar: garantiza
+        # que los bytes ejecutados == los bytes validados por security_check (cierra
+        # el TOCTOU / tamper del .py en disco). Antes solo se escribía si no existía,
+        # así que un archivo alterado en disco se ejecutaba sin revalidar.
         script_path = os.path.join(self.config.ARTIFACT_DIR, f"{artifact.id}.py")
-        if not os.path.exists(script_path):
-            with open(script_path, 'w') as f:
-                f.write(artifact.script_content)
+        with open(script_path, 'w') as f:
+            f.write(artifact.script_content)
 
         input_str = json.dumps(input_data) if input_data is not None else "{}"
 
@@ -150,9 +157,12 @@ class CompiledAIRouter:
             self.config.LLM_MODEL, prompt_tokens, completion_tokens,
             self.config.TOKEN_COST_INPUT, self.config.TOKEN_COST_OUTPUT,
         )
-        # Registrar baseline real por request.
+        # Registrar baseline real por request (global + por task_type).
         self.passthrough_tokens.append(total_tokens)
         self.passthrough_costs.append(cost)
+        ttype = request.task_type or detect_task_type(request.prompt)
+        self.passthrough_tokens_by_type.setdefault(ttype, []).append(total_tokens)
+        self.passthrough_costs_by_type.setdefault(ttype, []).append(cost)
         return {"result": content}, latency_ms, total_tokens, cost, True
 
     def _estimate(self, prompt: str) -> Tuple[int, float]:
@@ -161,15 +171,18 @@ class CompiledAIRouter:
         cost = tokens * self.config.TOKEN_COST_INPUT
         return tokens, cost
 
-    def _saved_baseline(self, prompt: str) -> Tuple[int, float, bool]:
-        """Cuánto habría costado ir al LLM (para calcular ahorro en un cache hit).
+    def _saved_baseline(self, prompt: str, task_type: str) -> Tuple[int, float, bool]:
+        """Cuánto habría costado ir al LLM (ahorro de un cache hit) para ESTA clase de tarea.
 
-        Devuelve (tokens, cost_usd, measured). measured=True solo si hay baseline real
-        de passthrough medido; si no, usa una estimación y marca measured=False.
+        Devuelve (tokens, cost_usd, measured). measured=True SOLO si esa misma
+        task_type tuvo un passthrough real medido — no un promedio global de otras
+        tareas. Si no, estima y marca measured=False.
         """
-        if self.passthrough_tokens and self.passthrough_costs:
-            return round(mean(self.passthrough_tokens)), mean(self.passthrough_costs), True
-        # Sin baseline real: estimamos (para que el demo muestre algo) pero lo flageamos.
+        toks = self.passthrough_tokens_by_type.get(task_type)
+        costs = self.passthrough_costs_by_type.get(task_type)
+        if toks and costs:
+            return round(mean(toks)), mean(costs), True
+        # Sin baseline real para esta clase: estimamos (demo) y lo flageamos.
         self.any_simulated = True
         tokens, cost = self._estimate(prompt)
         return tokens, cost, False
@@ -186,7 +199,7 @@ class CompiledAIRouter:
             if artifact.prompt_hash == prompt_hash:
                 output, duration, success = self.execute_artifact(artifact, request.input_data)
                 if success:
-                    return self._on_compiled_hit(request, "compiled", output, duration, artifact.id)
+                    return self._on_compiled_hit(request, "compiled", output, duration, artifact)
                 else:
                     logger.warning(f"Artifact {artifact.id} failed on input (Drift detected). Triggering re-compilation...")
                     self.metrics.drift_events += 1
@@ -198,7 +211,8 @@ class CompiledAIRouter:
                     output, duration, _ = self.execute_artifact(new_artifact, request.input_data)
                     self.metrics.compilations += 1
                     self.metrics.recompilations += 1
-                    return self._on_compiled_hit(request, "recompiled", output, duration, new_artifact.id)
+                    # Una recompilación GASTÓ tokens de LLM: NO es un ahorro ni un cache hit.
+                    return self._on_compile(request, "recompiled", output, duration, new_artifact)
 
         # 2. Similarity-based Cache Hit
         if not request.force_compile and not request.force_passthrough:
@@ -207,10 +221,10 @@ class CompiledAIRouter:
             if best_match:
                 output, duration, success = self.execute_artifact(best_match, request.input_data)
                 if success:
-                    return self._on_compiled_hit(request, "compiled", output, duration, best_match.id)
+                    return self._on_compiled_hit(request, "compiled", output, duration, best_match)
 
-        # 3. Passthrough
-        if request.force_passthrough or not self.is_compilable(request.prompt):
+        # 3. Passthrough (force_compile NUNCA cae a passthrough)
+        if request.force_passthrough or (not self.is_compilable(request.prompt) and not request.force_compile):
             self.metrics.passthroughs += 1
             output, duration, tokens, cost, measured = self._passthrough(request)
             self.passthrough_latencies.append(duration)
@@ -223,25 +237,15 @@ class CompiledAIRouter:
         # 4. First-time Compile & Cache
         self.metrics.compilations += 1
         artifact = compile_task(request, self.config.OPENAI_API_KEY, self.config.LLM_MODEL, self.config.LLM_BASE_URL)
+        # Reusar id si ya existe un artifact con el mismo prompt_hash (evita duplicados
+        # con force_compile): se sobrescribe en vez de crear un uuid nuevo por cada compile.
+        existing = next((a for a in self.artifacts.values() if a.prompt_hash == prompt_hash), None)
+        if existing:
+            artifact.id = existing.id
         self._track_compile_cost(artifact)
         self.save_artifact(artifact)
-
         output, duration, _ = self.execute_artifact(artifact, request.input_data)
-        self.compiled_latencies.append(duration)
-        # Una compilación nueva SÍ gastó tokens (los de compilar).
-        if artifact.metadata.get("measured"):
-            tokens = artifact.metadata.get("compile_prompt_tokens", 0) + artifact.metadata.get("compile_completion_tokens", 0)
-            cost = artifact.metadata.get("compile_cost_usd", 0.0)
-            measured = True
-        else:
-            self.any_simulated = True
-            tokens, cost = self._estimate(request.prompt)
-            measured = False
-        return self._build_response(
-            request, "compile_new", output, duration,
-            tokens_used=tokens, cost_usd=cost, tokens_saved=0, cost_saved=0.0,
-            measured=measured, artifact_id=artifact.id,
-        )
+        return self._on_compile(request, "compile_new", output, duration, artifact)
 
     def _track_compile_cost(self, artifact: CompiledArtifact):
         # Recalcula el costo con las tarifas de config (fallback para modelos
@@ -258,16 +262,38 @@ class CompiledAIRouter:
         if cost:
             self.compile_costs.append(cost)
 
-    def _on_compiled_hit(self, request: TaskRequest, route: str, output: Any, duration: float, artifact_id: str) -> TaskResponse:
+    def _on_compiled_hit(self, request: TaskRequest, route: str, output: Any, duration: float, artifact: CompiledArtifact) -> TaskResponse:
+        """Cache hit real: 0 tokens gastados, ahorro = baseline de ESA task_type."""
         self.metrics.compiled_hits += 1
         self.compiled_latencies.append(duration)
-        saved_tokens, saved_cost, measured = self._saved_baseline(request.prompt)
+        saved_tokens, saved_cost, measured = self._saved_baseline(request.prompt, artifact.task_type)
         return self._build_response(
             request, route, output, duration,
             tokens_used=0, cost_usd=0.0,
             tokens_saved=saved_tokens, cost_saved=saved_cost,
             measured=measured,
-            artifact_id=artifact_id,
+            artifact_id=artifact.id,
+        )
+
+    def _on_compile(self, request: TaskRequest, route: str, output: Any, duration: float, artifact: CompiledArtifact) -> TaskResponse:
+        """Compilación (nueva o recompilación por drift): GASTÓ tokens de LLM.
+
+        No es un ahorro ni un cache hit — no incrementa compiled_hits. Contabiliza
+        el costo real de compilar (o una estimación flageada en modo demo).
+        """
+        self.compiled_latencies.append(duration)
+        if artifact.metadata.get("measured"):
+            tokens = artifact.metadata.get("compile_prompt_tokens", 0) + artifact.metadata.get("compile_completion_tokens", 0)
+            cost = artifact.metadata.get("compile_cost_usd", 0.0)
+            measured = True
+        else:
+            self.any_simulated = True
+            tokens, cost = self._estimate(request.prompt)
+            measured = False
+        return self._build_response(
+            request, route, output, duration,
+            tokens_used=tokens, cost_usd=cost, tokens_saved=0, cost_saved=0.0,
+            measured=measured, artifact_id=artifact.id,
         )
 
     def _build_response(self, request: TaskRequest, route: str, output: Any, latency: float,
