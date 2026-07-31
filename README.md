@@ -1,4 +1,6 @@
-# Compiled AI Router — intelligence that runs at the speed of code
+# Petra — intelligence that runs at the speed of code
+
+> **Petra** convierte la probabilidad difusa de un LLM en código sólido y determinista: compila una tarea una vez y la ejecuta muchas, rápido y auditable. (El paquete Python todavía se importa como `compiled_ai_router` — rename pendiente en el roadmap.)
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/CompiledAI/router)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
