@@ -87,10 +87,13 @@ Bloqueante técnico #1. El fix de velocidad y el de seguridad son el mismo probl
 - [x] **Spike WASM completado** ([`docs/wasm-sandbox-spike.md`](wasm-sandbox-spike.md), prototipo en `spike/`): `WasmExecutor` con la misma firma que `LocalExecutor` corre un artifact real sin modificarlo, aislado (fs/red denegados, fuel corta bucles infinitos). **Conclusión:** aislamiento real y barato, pero Python-en-WASM naive es ~2× más lento que el subprocess → ver D-3.
 - [ ] **Siguiente decisión (WASM):** spike de **Wizer** (pre-init de `python.wasm`) para bajar el boot de ~70 ms a <10-15 ms. Solo si rinde, WASM gana en seguridad *y* velocidad manteniendo Python. Plan B: subprocess+rlimit interino (ya hecho) + WASM solo cuando el aislamiento sea requisito de venta.
 - [x] Análisis estático real al compilar: gate 2b con **Bandit** (SAST), como complemento del blocklist. Opcional — si no está instalado, se saltea con aviso (`validator.gate_2b_bandit`).
+- [x] **2da revisión adversaria → el gate estático NO es un límite de seguridad (probado).** Un 2º agente fresco evadió el allowlist con módulos que resuelven atributos por STRING (no como nodo AST): `operator.attrgetter`, `string.Formatter().get_field` → RCE. Incluso `str.format` (builtin, sin import) navega atributos. **Conclusión definitiva (confirma D-2): un gate de AST no puede contener Python.** Acciones:
+  - Quitados `operator` y `string` del allowlist (mata los 2 vectores de RCE demostrados). `str.format` queda como info-leak (repr), no RCE directo. NO se declara seguro.
+  - **Sandbox de OS en el executor (macOS `sandbox-exec`/seatbelt):** confina la escritura al workdir temporal y **DENIEGA la red**, aunque el gate se evada. Verificado (`test_executor_seatbelt_contains_file_write`). **Esta es la contención real, no el gate.**
 - [ ] **Limitaciones honestas pendientes (requieren WASM/microVM):**
-  - *El gate es la defensa real; el executor solo NO es una jaula.* Si se ejecuta código que NO pasó el gate (llamando al executor directo), el rlimit **no** contiene escritura de archivos ni red en macOS. En el flujo del router el gate bloquea, pero no confiar en el executor como contención.
-  - *Memoria:* `RLIMIT_AS/DATA` no se aplican en macOS → un artifact puede agotar RAM con Python puro (sin imports). Contenido solo por CPU-time y wall-timeout.
-  - *Red:* sin namespaces en macOS; hoy se corta solo por el allowlist de imports, no a nivel OS.
+  - *Lectura de archivos NO contenida* (seatbelt permite `file-read*` porque Python necesita su stdlib) → un exploit puede LEER archivos y devolverlos en su output (exfil vía resultado). Confidencialidad fuerte = WASM/microVM con FS acotado.
+  - *Linux/producción:* `sandbox-exec` es solo macOS (y deprecado). En Linux el límite lo da el contenedor/microVM (nsjail/bubblewrap/gVisor/Firecracker) o WASM. Hoy en Linux el executor NO tiene sandbox OS.
+  - *Memoria:* `RLIMIT_AS/DATA` no se aplican en macOS → agotamiento de RAM contenido solo por CPU-time/wall-timeout.
 - [ ] **Deuda encontrada de paso:** `vendor_deps` tiene `.so` nativos que `.gitignore` (`*.so`) excluye → un clone/CI/worktree/Docker no puede importar `pydantic_core`. Definir estrategia de deps (no vendorizar binarios, o instalarlas en build).
 
 ### Fase 3 — LLM real + validación por ejemplos
