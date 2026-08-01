@@ -2,11 +2,19 @@ from datetime import datetime
 from typing import Optional, Any, Dict, List
 from pydantic import BaseModel, Field
 
+class ExampleIO(BaseModel):
+    """Un par input→output esperado para validar que el artifact GENERALIZA."""
+    input_data: Any = None
+    expected_output: Any = None
+
 class TaskRequest(BaseModel):
     prompt: str
     input_data: Optional[Any] = None
     task_type: Optional[str] = None
     expected_output: Optional[str] = None
+    # Ejemplos held-out (estilo PROSE/FlashFill): el script compilado debe pasar
+    # TODOS, no solo el ejemplo de compilación. Rigor contra sobreajuste.
+    examples: List[ExampleIO] = Field(default_factory=list)
     force_compile: bool = False
     force_passthrough: bool = False
 

@@ -96,12 +96,13 @@ Bloqueante técnico #1. El fix de velocidad y el de seguridad son el mismo probl
   - *Memoria:* `RLIMIT_AS/DATA` no se aplican en macOS → agotamiento de RAM contenido solo por CPU-time/wall-timeout.
 - [ ] **Deuda encontrada de paso:** `vendor_deps` tiene `.so` nativos que `.gitignore` (`*.so`) excluye → un clone/CI/worktree/Docker no puede importar `pydantic_core`. Definir estrategia de deps (no vendorizar binarios, o instalarlas en build).
 
-### Fase 3 — LLM real + validación por ejemplos
+### Fase 3 — LLM real + validación por ejemplos (en curso)
 Cerrar el loop de compilación con rigor (idea robada de PROSE/FlashFill: exigir generalización, no que pase 1 ejemplo).
-- [ ] Ejercitar y testear el path de compilación con LLM real (hoy solo `demo` está probado).
-- [ ] Contrato de I/O documentado y testeado con casos borde.
-- [ ] **Golden tests por clase de tarea:** set de input→output esperado; el gate semántico corre contra ejemplos *held-out*, no solo el de compilación.
-- [ ] Regeneración automática ante fallo de validación (con límite de reintentos).
+- [x] **Ejemplos held-out** (`TaskRequest.examples: List[ExampleIO]`): el script debe pasar `gate_5_examples` (todos los input→output), no solo el ejemplo de compilación. Rigor contra sobreajuste.
+- [x] **Regeneración automática** ante fallo de validación: loop de reintento (`MAX_COMPILE_ATTEMPTS=3`) que le devuelve el error del gate al LLM y le pide corregir; acumula tokens de todos los intentos. Testeado con cliente LLM falso (malo→bueno en 2 intentos).
+- [x] **Golden tests** del gate de ejemplos y de la compilación con ejemplos (satisfacibles → pasa; imposibles → falla y no cachea).
+- [ ] **Verificación con LLM real (pendiente):** correr el path real contra **Ollama cloud** (no local) end-to-end. Requiere `ollama signin` + modelo cloud.
+- [ ] Contrato de I/O documentado con más casos borde (hoy: JSON stdin→stdout; el system prompt lo fija).
 
 ### Fase 4 — Diferenciador: confianza medida en vivo (shadow execution) ⭐
 Lo que te separa de un "caché de LLM". Ver D-5.

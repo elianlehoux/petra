@@ -255,33 +255,60 @@ def gate_4_semantic(script_content: str, input_data: Any, expected_output: Optio
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
-def validate_script(script_content: str, sample_input: Optional[Any] = None, expected_output: Optional[str] = None) -> Tuple[bool, List[ValidationResult]]:
-    """Runs all 4 gates on a compiled script artifact."""
+def gate_5_examples(script_content: str, examples: Optional[List[Any]] = None) -> ValidationResult:
+    """Gate 5: Generalización — el script debe pasar TODOS los ejemplos held-out.
+
+    `examples` es una lista de objetos con `.input_data` y `.expected_output`
+    (ver models.ExampleIO). Rigor estilo PROSE: no basta con un ejemplo, tiene que
+    generalizar. Si no hay ejemplos, se saltea.
+    """
+    start = time.perf_counter()
+    if not examples:
+        dur = (time.perf_counter() - start) * 1000
+        return ValidationResult(passed=True, gate_name="5_examples", message="Sin ejemplos held-out, gate salteado", duration_ms=dur)
+
+    for i, ex in enumerate(examples):
+        input_str = json.dumps(ex.input_data) if ex.input_data is not None else "{}"
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(script_content)
+            temp_path = f.name
+        try:
+            proc = subprocess.run([sys.executable, temp_path], input=input_str, text=True, capture_output=True, timeout=5)
+            if proc.returncode != 0:
+                dur = (time.perf_counter() - start) * 1000
+                return ValidationResult(passed=False, gate_name="5_examples", message=f"Ejemplo {i}: runtime error: {proc.stderr.strip()[:120]}", duration_ms=dur)
+            try:
+                actual = json.loads(proc.stdout.strip())
+            except Exception:
+                dur = (time.perf_counter() - start) * 1000
+                return ValidationResult(passed=False, gate_name="5_examples", message=f"Ejemplo {i}: output no es JSON: {proc.stdout[:80]}", duration_ms=dur)
+            if actual != ex.expected_output:
+                dur = (time.perf_counter() - start) * 1000
+                return ValidationResult(passed=False, gate_name="5_examples", message=f"Ejemplo {i}: got {actual}, expected {ex.expected_output}", duration_ms=dur)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    dur = (time.perf_counter() - start) * 1000
+    return ValidationResult(passed=True, gate_name="5_examples", message=f"Pasó los {len(examples)} ejemplos held-out", duration_ms=dur)
+
+
+def validate_script(script_content: str, sample_input: Optional[Any] = None,
+                    expected_output: Optional[str] = None, examples: Optional[List[Any]] = None) -> Tuple[bool, List[ValidationResult]]:
+    """Corre el pipeline de gates sobre un script compilado."""
     results = []
-    
-    r1 = gate_1_syntax(script_content)
-    results.append(r1)
-    if not r1.passed:
-        return False, results
 
-    r2 = gate_2_security(script_content)
-    results.append(r2)
-    if not r2.passed:
-        return False, results
-
-    r2b = gate_2b_bandit(script_content)
-    results.append(r2b)
-    if not r2b.passed:
-        return False, results
-
-    r3 = gate_3_sandbox(script_content, sample_input)
-    results.append(r3)
-    if not r3.passed:
-        return False, results
-
-    r4 = gate_4_semantic(script_content, sample_input, expected_output)
-    results.append(r4)
-    if not r4.passed:
-        return False, results
+    for gate in (
+        lambda: gate_1_syntax(script_content),
+        lambda: gate_2_security(script_content),
+        lambda: gate_2b_bandit(script_content),
+        lambda: gate_3_sandbox(script_content, sample_input),
+        lambda: gate_4_semantic(script_content, sample_input, expected_output),
+        lambda: gate_5_examples(script_content, examples),
+    ):
+        r = gate()
+        results.append(r)
+        if not r.passed:
+            return False, results
 
     return True, results
