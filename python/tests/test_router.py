@@ -1,9 +1,31 @@
+import os
+import sys
+import json
 import pytest
 import shutil
 import tempfile
 from compiled_ai_router.router import CompiledAIRouter
 from compiled_ai_router.config import Settings
 from compiled_ai_router.models import TaskRequest
+from compiled_ai_router.rust_bridge import LocalExecutor, _SANDBOX_EXEC
+
+
+@pytest.mark.skipif(sys.platform != "darwin" or not _SANDBOX_EXEC,
+                    reason="seatbelt (sandbox-exec) solo disponible en macOS")
+def test_executor_seatbelt_contains_file_write(tmp_path):
+    # Aunque el código llegue al executor (gate evadido), el sandbox de OS debe
+    # DENEGAR la escritura fuera del cwd temporal. Contención real, no el gate.
+    marker = "/tmp/carouter_seatbelt_test_marker"
+    if os.path.exists(marker):
+        os.remove(marker)
+    mal = ("import sys,json\nsys.stdin.read()\nw=False\n"
+           "try:\n open(%r,'w').write('x'); w=True\nexcept Exception: pass\n"
+           "print(json.dumps({'wrote_outside': w}))" % marker)
+    script = tmp_path / "mal.py"
+    script.write_text(mal)
+    out, _dur = LocalExecutor().execute_artifact(str(script), "{}")
+    assert json.loads(out)["wrote_outside"] is False
+    assert not os.path.exists(marker)
 
 @pytest.fixture
 def temp_router():

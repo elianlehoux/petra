@@ -21,11 +21,16 @@ logger = logging.getLogger(__name__)
 ALLOWED_MODULES = {
     "sys",  # solo sys.stdin/stdout/stderr/exit/argv (ver visit_Attribute)
     "json", "re", "math", "cmath", "decimal", "fractions", "random", "statistics",
-    "string", "textwrap", "datetime", "time", "calendar", "zoneinfo",
-    "collections", "itertools", "functools", "operator", "heapq", "bisect", "copy",
+    "textwrap", "datetime", "time", "calendar", "zoneinfo",
+    "collections", "itertools", "functools", "heapq", "bisect", "copy",
     "typing", "dataclasses", "enum", "numbers", "unicodedata",
     "base64", "binascii", "hashlib", "hmac", "uuid", "struct", "html",
 }
+# NOTA: `operator` y `string` se excluyen a propósito: `operator.attrgetter`/
+# `methodcaller` y `string.Formatter().get_field` resuelven atributos por STRING
+# (no como nodo AST literal) y evaden DANGEROUS_DUNDERS. Aun así, `str.format`
+# (builtin, sin import) permite el mismo truco → el gate NO es un límite de
+# seguridad. La contención real es el sandbox de OS del executor + WASM/microVM.
 
 # Nombres builtin prohibidos, tanto como llamada como referencia (x = open; x(...)).
 # Se bloquea el camino de escape clásico: open, getattr/setattr, eval/exec, etc.

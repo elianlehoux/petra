@@ -12,17 +12,47 @@ Hasta entonces, esta clase es un ejecutor local honesto y directo.
 
 import os
 import sys
+import shutil
 import subprocess
 import tempfile
 import time
 import hashlib
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 try:
     import resource  # POSIX only
 except ImportError:  # pragma: no cover - Windows
     resource = None
+
+# Sandbox de OS en macOS (seatbelt). Contiene el DAÑO aunque el gate estático se
+# evada (los gates de AST NO son un límite de seguridad — ver docs/ROADMAP.md D-2):
+# confina la escritura de archivos al workdir temporal y DENIEGA la red.
+# En Linux/producción el límite lo da el contenedor/microVM (o WASM).
+# Limitación honesta: la LECTURA de archivos NO se restringe (python necesita leer
+# su stdlib); confidencialidad fuerte requiere WASM/microVM con FS acotado.
+_SANDBOX_EXEC = shutil.which("sandbox-exec") if sys.platform == "darwin" else None
+
+
+def _seatbelt_profile(workdir_real: str) -> str:
+    return (
+        "(version 1)"
+        "(deny default)"
+        "(allow process*)"
+        "(allow file-read*)"
+        f'(allow file-write* (subpath "{workdir_real}"))'
+        '(allow file-write-data (path "/dev/null"))'
+        "(allow sysctl-read)"
+        "(allow mach-lookup)"
+        "(deny network*)"
+    )
+
+
+def _build_cmd(script_path: str, workdir_real: str) -> List[str]:
+    base = [sys.executable, "-I", script_path]
+    if _SANDBOX_EXEC:
+        return [_SANDBOX_EXEC, "-p", _seatbelt_profile(workdir_real)] + base
+    return base
 
 logger = logging.getLogger(__name__)
 
@@ -83,13 +113,15 @@ class LocalExecutor:
         preexec = _apply_resource_limits if resource is not None else None
         try:
             with tempfile.TemporaryDirectory(prefix="carouter_exec_") as workdir:
+                # realpath: seatbelt resuelve symlinks (/tmp -> /private/tmp).
+                workdir_real = os.path.realpath(workdir)
                 proc = subprocess.run(
-                    [sys.executable, "-I", script_path],
+                    _build_cmd(script_path, workdir_real),   # sandbox-exec en macOS
                     input=input_data,
                     text=True,
                     capture_output=True,
                     timeout=_WALL_TIMEOUT_SECONDS,
-                    cwd=workdir,           # cwd descartable, no el del proyecto
+                    cwd=workdir_real,      # cwd descartable, no el del proyecto
                     env=env,
                     preexec_fn=preexec,    # rlimits (POSIX)
                 )
