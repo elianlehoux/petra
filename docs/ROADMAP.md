@@ -101,7 +101,7 @@ Cerrar el loop de compilación con rigor (idea robada de PROSE/FlashFill: exigir
 - [x] **Ejemplos held-out** (`TaskRequest.examples: List[ExampleIO]`): el script debe pasar `gate_5_examples` (todos los input→output), no solo el ejemplo de compilación. Rigor contra sobreajuste.
 - [x] **Regeneración automática** ante fallo de validación: loop de reintento (`MAX_COMPILE_ATTEMPTS=3`) que le devuelve el error del gate al LLM y le pide corregir; acumula tokens de todos los intentos. Testeado con cliente LLM falso (malo→bueno en 2 intentos).
 - [x] **Golden tests** del gate de ejemplos y de la compilación con ejemplos (satisfacibles → pasa; imposibles → falla y no cachea).
-- [ ] **Verificación con LLM real (pendiente):** correr el path real contra **Ollama cloud** (no local) end-to-end. Requiere `ollama signin` + modelo cloud.
+- [x] **Verificado con LLM real (Ollama cloud, `gpt-oss:20b-cloud`, remoto):** compilación end-to-end de extracción de facturas con 2 ejemplos held-out → **éxito en 2 intentos** (el 1º falló un gate, el modelo se autocorrigió con el feedback y el 2º pasó los 6 gates, incluido `gate_5_examples`). El retry loop y la validación por ejemplos funcionan con un LLM real. Tokens reales: 1496/3522.
 - [ ] Contrato de I/O documentado con más casos borde (hoy: JSON stdin→stdout; el system prompt lo fija).
 - [x] **Revisión adversaria (agente fresco) + fixes** — 4 bugs corregidos con test de regresión (51 tests):
   - `gate_5` no atrapaba `TimeoutExpired` → un ejemplo con bucle infinito abortaba la compilación en vez de disparar el retry. Ahora manejado.
