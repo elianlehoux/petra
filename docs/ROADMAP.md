@@ -109,6 +109,10 @@ Cerrar el loop de compilación con rigor (idea robada de PROSE/FlashFill: exigir
   - Script vacío pasaba todos los gates → `gate_1` ahora rechaza vacío.
   - **Gap de seguridad cerrado:** los gates 3/4/5 ejecutaban código no confiable SIN el sandbox de OS. Ahora corren vía `run_sandboxed` (seatbelt + rlimits), igual que el runtime.
   - *Conocido (menor):* la comparación de ejemplos usa `==` de Python (`True==1`, `1==1.0`); no distingue esos tipos. Aceptable por ahora.
+- [x] **2da verificación (agente fresco) + fixes** (54 tests): confirmó bugs #2/#3 resueltos y cerró:
+  - Script **efectivamente-vacío** (`pass`, solo comentario/docstring) pasaba todo → `gate_3` ahora exige salida JSON no vacía (el contrato es escribir JSON a stdout).
+  - **Gap Linux honesto:** `run_sandboxed`/`LocalExecutor` solo tienen seatbelt en macOS; en Linux corren con rlimits best-effort sin confinar FS/red. Se agregó `SANDBOX_OS_ACTIVE` + warning al import. **En Linux/prod, ejecutar dentro de contenedor/microVM.**
+  - `gate_5` alineado con `gate_4` (fallback de comparación textual).
 
 ### Fase 4 — Diferenciador: confianza medida en vivo (shadow execution) ⭐
 Lo que te separa de un "caché de LLM". Ver D-5.

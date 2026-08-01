@@ -78,6 +78,14 @@ def test_allowlist_permits_safe_stdlib(script):
     res = gate_2_security(script)
     assert res.passed is True
 
+@pytest.mark.parametrize("script", ["pass\n", "# solo un comentario\n", '"""solo docstring"""\n'])
+def test_effectively_empty_script_rejected(script):
+    # BUG4 completo: un script que no produce salida (pass/comentario/docstring)
+    # no debe pasar la validación aunque no haya ejemplos.
+    valid, results = validate_script(script)
+    assert valid is False
+    assert results[-1].gate_name == "3_sandbox"
+
 def test_gate_1_rejects_empty_script():
     # BUG3: un script vacío no debe pasar como válido.
     assert gate_1_syntax("").passed is False

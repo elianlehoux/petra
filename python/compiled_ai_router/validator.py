@@ -206,8 +206,12 @@ def gate_3_sandbox(script_content: str, sample_input: Optional[Any] = None) -> V
         return ValidationResult(passed=False, gate_name="3_sandbox", message="Execution timed out (>5s)", duration_ms=dur)
     if rc != 0:
         return ValidationResult(passed=False, gate_name="3_sandbox", message=f"Runtime error (exit code {rc}): {stderr.strip()}", duration_ms=dur)
+    # El contrato es escribir JSON a stdout. Un script sin salida (ej. 'pass',
+    # solo comentarios/docstring) es basura degenerada: se rechaza (antes pasaba).
+    if not stdout.strip():
+        return ValidationResult(passed=False, gate_name="3_sandbox", message="El script no produjo salida JSON en stdout", duration_ms=dur)
     try:
-        json.loads(stdout.strip()) if stdout.strip() else None
+        json.loads(stdout.strip())
     except Exception:
         return ValidationResult(passed=False, gate_name="3_sandbox", message=f"Output is not valid JSON: {stdout[:100]}", duration_ms=dur)
     return ValidationResult(passed=True, gate_name="3_sandbox", message="Sandbox execution successful", duration_ms=dur)
@@ -260,6 +264,9 @@ def gate_5_examples(script_content: str, examples: Optional[List[Any]] = None) -
         try:
             actual = json.loads(stdout.strip())
         except Exception:
+            # Fallback textual (consistente con gate_4): esperado como string no-JSON.
+            if isinstance(ex.expected_output, str) and stdout.strip() == ex.expected_output.strip():
+                continue
             return ValidationResult(passed=False, gate_name="5_examples", message=f"Ejemplo {i}: output no es JSON: {stdout[:80]}", duration_ms=dur)
         expected = _coerce_expected(ex.expected_output)  # BUG2: parsear si viene como string JSON
         if actual != expected:
