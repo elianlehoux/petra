@@ -78,6 +78,25 @@ def test_allowlist_permits_safe_stdlib(script):
     res = gate_2_security(script)
     assert res.passed is True
 
+def test_gate_1_rejects_empty_script():
+    # BUG3: un script vacío no debe pasar como válido.
+    assert gate_1_syntax("").passed is False
+    assert gate_1_syntax("   \n  ").passed is False
+
+def test_run_sandboxed_timeout():
+    # BUG1 (mecanismo): run_sandboxed reporta timed_out en vez de propagar excepción.
+    from compiled_ai_router.rust_bridge import run_sandboxed
+    rc, out, err, timed_out = run_sandboxed("while True:\n pass\n", "{}", timeout=1)
+    assert timed_out is True
+
+def test_gate_5_string_expected_output():
+    # BUG2: expected_output como string JSON debe compararse parseado, no como str.
+    from compiled_ai_router.validator import gate_5_examples
+    from compiled_ai_router.models import ExampleIO
+    echo = "import sys,json\nd=json.loads(sys.stdin.read() or '{}')\nprint(json.dumps({'result': d.get('n')}))"
+    ex = ExampleIO(input_data={"n": 5}, expected_output='{"result": 5}')  # string JSON
+    assert gate_5_examples(echo, [ex]).passed is True
+
 def test_gate_5_examples_pass_and_fail():
     from compiled_ai_router.validator import gate_5_examples
     from compiled_ai_router.models import ExampleIO

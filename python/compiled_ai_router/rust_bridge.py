@@ -144,3 +144,28 @@ class LocalExecutor:
 # Alias de compatibilidad: el router importa `RustEngine`. Se mantiene el nombre
 # para no romper imports; renombrar es parte de la limpieza de la Fase 2.
 RustEngine = LocalExecutor
+
+
+def run_sandboxed(script_content: str, input_str: str, timeout: int = 5) -> Tuple[int, str, str, bool]:
+    """Corre un script NO CONFIABLE bajo el mismo sandbox que el runtime (seatbelt +
+    rlimits + intérprete aislado). Lo usan los gates de validación, que antes
+    ejecutaban código generado por LLM SIN aislamiento de OS.
+
+    Devuelve (returncode, stdout, stderr, timed_out).
+    """
+    env = {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "LANG": "C"}
+    preexec = _apply_resource_limits if resource is not None else None
+    with tempfile.TemporaryDirectory(prefix="carouter_val_") as workdir:
+        workdir_real = os.path.realpath(workdir)
+        script_path = os.path.join(workdir_real, "candidate.py")
+        with open(script_path, "w") as f:
+            f.write(script_content)
+        try:
+            proc = subprocess.run(
+                _build_cmd(script_path, workdir_real),
+                input=input_str, text=True, capture_output=True,
+                timeout=timeout, cwd=workdir_real, env=env, preexec_fn=preexec,
+            )
+            return proc.returncode, proc.stdout, proc.stderr, False
+        except subprocess.TimeoutExpired:
+            return -1, "", f"timeout (>{timeout}s)", True
