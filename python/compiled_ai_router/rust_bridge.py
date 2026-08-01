@@ -32,6 +32,16 @@ except ImportError:  # pragma: no cover - Windows
 # Limitación honesta: la LECTURA de archivos NO se restringe (python necesita leer
 # su stdlib); confidencialidad fuerte requiere WASM/microVM con FS acotado.
 _SANDBOX_EXEC = shutil.which("sandbox-exec") if sys.platform == "darwin" else None
+# Señal honesta: el sandbox de OS (seatbelt) SOLO existe en macOS. En Linux/otros,
+# `run_sandboxed`/`LocalExecutor` corren con rlimits best-effort pero NO confinan
+# FS/red — la contención real allá la debe dar un contenedor/microVM (ROADMAP D-2/D-3).
+SANDBOX_OS_ACTIVE = _SANDBOX_EXEC is not None
+if not SANDBOX_OS_ACTIVE:
+    logger.warning(
+        "Sandbox de OS NO activo (no es macOS/sandbox-exec): la ejecución de código no "
+        "confiable solo tiene rlimits best-effort, sin confinar FS/red. En Linux/producción, "
+        "ejecutar dentro de un contenedor/microVM (ver docs/ROADMAP.md D-2/D-3)."
+    )
 
 
 def _seatbelt_profile(workdir_real: str) -> str:

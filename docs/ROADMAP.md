@@ -101,7 +101,7 @@ Cerrar el loop de compilación con rigor (idea robada de PROSE/FlashFill: exigir
 - [x] **Ejemplos held-out** (`TaskRequest.examples: List[ExampleIO]`): el script debe pasar `gate_5_examples` (todos los input→output), no solo el ejemplo de compilación. Rigor contra sobreajuste.
 - [x] **Regeneración automática** ante fallo de validación: loop de reintento (`MAX_COMPILE_ATTEMPTS=3`) que le devuelve el error del gate al LLM y le pide corregir; acumula tokens de todos los intentos. Testeado con cliente LLM falso (malo→bueno en 2 intentos).
 - [x] **Golden tests** del gate de ejemplos y de la compilación con ejemplos (satisfacibles → pasa; imposibles → falla y no cachea).
-- [ ] **Verificación con LLM real (pendiente):** correr el path real contra **Ollama cloud** (no local) end-to-end. Requiere `ollama signin` + modelo cloud.
+- [x] **Verificado con LLM real (Ollama cloud, `gpt-oss:20b-cloud`, remoto):** compilación end-to-end de extracción de facturas con 2 ejemplos held-out → **éxito en 2 intentos** (el 1º falló un gate, el modelo se autocorrigió con el feedback y el 2º pasó los 6 gates, incluido `gate_5_examples`). El retry loop y la validación por ejemplos funcionan con un LLM real. Tokens reales: 1496/3522.
 - [ ] Contrato de I/O documentado con más casos borde (hoy: JSON stdin→stdout; el system prompt lo fija).
 - [x] **Revisión adversaria (agente fresco) + fixes** — 4 bugs corregidos con test de regresión (51 tests):
   - `gate_5` no atrapaba `TimeoutExpired` → un ejemplo con bucle infinito abortaba la compilación en vez de disparar el retry. Ahora manejado.
@@ -109,6 +109,10 @@ Cerrar el loop de compilación con rigor (idea robada de PROSE/FlashFill: exigir
   - Script vacío pasaba todos los gates → `gate_1` ahora rechaza vacío.
   - **Gap de seguridad cerrado:** los gates 3/4/5 ejecutaban código no confiable SIN el sandbox de OS. Ahora corren vía `run_sandboxed` (seatbelt + rlimits), igual que el runtime.
   - *Conocido (menor):* la comparación de ejemplos usa `==` de Python (`True==1`, `1==1.0`); no distingue esos tipos. Aceptable por ahora.
+- [x] **2da verificación (agente fresco) + fixes** (54 tests): confirmó bugs #2/#3 resueltos y cerró:
+  - Script **efectivamente-vacío** (`pass`, solo comentario/docstring) pasaba todo → `gate_3` ahora exige salida JSON no vacía (el contrato es escribir JSON a stdout).
+  - **Gap Linux honesto:** `run_sandboxed`/`LocalExecutor` solo tienen seatbelt en macOS; en Linux corren con rlimits best-effort sin confinar FS/red. Se agregó `SANDBOX_OS_ACTIVE` + warning al import. **En Linux/prod, ejecutar dentro de contenedor/microVM.**
+  - `gate_5` alineado con `gate_4` (fallback de comparación textual).
 
 ### Fase 4 — Diferenciador: confianza medida en vivo (shadow execution) ⭐
 Lo que te separa de un "caché de LLM". Ver D-5.
