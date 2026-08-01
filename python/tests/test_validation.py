@@ -78,6 +78,18 @@ def test_allowlist_permits_safe_stdlib(script):
     res = gate_2_security(script)
     assert res.passed is True
 
+def test_gate_5_examples_pass_and_fail():
+    from compiled_ai_router.validator import gate_5_examples
+    from compiled_ai_router.models import ExampleIO
+    echo = "import sys,json\nd=json.loads(sys.stdin.read() or '{}')\nprint(json.dumps({'echo': d}))"
+    ok = [ExampleIO(input_data={"a": 1}, expected_output={"echo": {"a": 1}}),
+          ExampleIO(input_data={"b": 2}, expected_output={"echo": {"b": 2}})]
+    assert gate_5_examples(echo, ok).passed is True
+    bad = [ExampleIO(input_data={"a": 1}, expected_output={"echo": {"WRONG": 1}})]
+    assert gate_5_examples(echo, bad).passed is False
+    # Sin ejemplos: se saltea (pasa).
+    assert gate_5_examples(echo, []).passed is True
+
 def test_bandit_gate_graceful_and_clean():
     # Script limpio: pasa igual esté o no instalado Bandit (si no está, se saltea).
     from compiled_ai_router.validator import gate_2b_bandit
@@ -117,7 +129,7 @@ def test_full_pipeline_pass():
     script = "import json, sys\nprint(json.dumps({'result': 'success'}))"
     valid, results = validate_script(script)
     assert valid is True
-    assert len(results) == 5  # syntax, security, bandit, sandbox, semantic
+    assert len(results) == 6  # syntax, security, bandit, sandbox, semantic, examples
 
 def test_full_pipeline_reject_malicious():
     script = "import subprocess\nsubprocess.run(['ls'])"

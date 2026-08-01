@@ -12,6 +12,9 @@ from .validator import validate_script
 
 logger = logging.getLogger(__name__)
 
+# Reintentos de compilación con feedback del error de validación al LLM (Fase 3).
+MAX_COMPILE_ATTEMPTS = 3
+
 def detect_task_type(prompt: str) -> str:
     lower_prompt = prompt.lower()
     if "extract" in lower_prompt or "parse" in lower_prompt or "invoice" in lower_prompt or "email" in lower_prompt:
@@ -112,7 +115,8 @@ def compile_task(request: TaskRequest, api_key: str, model: str, base_url: Optio
     if (api_key == "demo" or not api_key) and not base_url:
         logger.info("Demo mode: Generating mock compiled artifact")
         artifact.script_content = get_demo_script(request.prompt, task_type)
-        valid, validation_results = validate_script(artifact.script_content, request.input_data, request.expected_output)
+        valid, validation_results = validate_script(
+            artifact.script_content, request.input_data, request.expected_output, request.examples)
         artifact.validation_results = validation_results
         if not valid:
             raise ValueError(f"Compiled script failed validation: {validation_results[-1].message}")
@@ -121,42 +125,58 @@ def compile_task(request: TaskRequest, api_key: str, model: str, base_url: Optio
     try:
         client = openai.Client(api_key=api_key or "local", base_url=base_url) if base_url \
             else openai.Client(api_key=api_key)
-        start = time.perf_counter()
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": build_system_prompt(task_type)},
-                {"role": "user", "content": request.prompt}
-            ],
-            temperature=0.0
-        )
-        compile_latency_ms = (time.perf_counter() - start) * 1000
-        content = response.choices[0].message.content or ""
-        if "```python" in content:
-            script = content.split("```python")[1].split("```")[0].strip()
-        else:
-            script = content.strip()
+        messages = [
+            {"role": "system", "content": build_system_prompt(task_type)},
+            {"role": "user", "content": request.prompt},
+        ]
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_latency_ms = 0.0
+        script = ""
+        validation_results = []
 
-        # Uso REAL de la compilación (medido). El costo lo calcula el router,
-        # que tiene las tarifas de config para el fallback de modelos locales.
-        usage = getattr(response, "usage", None)
-        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+        # Loop de reintento: si la validación falla, se le devuelve el error al LLM
+        # y se le pide corregir (hasta MAX_COMPILE_ATTEMPTS). Rigor sobre "un intento".
+        for attempt in range(1, MAX_COMPILE_ATTEMPTS + 1):
+            start = time.perf_counter()
+            response = client.chat.completions.create(model=model, messages=messages, temperature=0.0)
+            total_latency_ms += (time.perf_counter() - start) * 1000
+            content = response.choices[0].message.content or ""
+            script = content.split("```python")[1].split("```")[0].strip() if "```python" in content else content.strip()
+
+            usage = getattr(response, "usage", None)
+            total_prompt_tokens += getattr(usage, "prompt_tokens", 0) or 0
+            total_completion_tokens += getattr(usage, "completion_tokens", 0) or 0
+
+            valid, validation_results = validate_script(
+                script, request.input_data, request.expected_output, request.examples)
+            if valid:
+                break
+
+            # Falló: feedback del error para el próximo intento.
+            fail = validation_results[-1]
+            logger.info(f"Compilación intento {attempt} falló en {fail.gate_name}: {fail.message}")
+            messages.append({"role": "assistant", "content": content})
+            messages.append({"role": "user", "content":
+                f"El script falló el gate '{fail.gate_name}': {fail.message}. "
+                f"Corregí el error y devolvé SOLO el código Python entre ```python ```."})
+
+        artifact.script_content = script
+        artifact.validation_results = validation_results
         artifact.metadata.update({
             "measured": True,
             "compile_model": model,
-            "compile_prompt_tokens": prompt_tokens,
-            "compile_completion_tokens": completion_tokens,
-            "compile_latency_ms": compile_latency_ms,
+            "compile_prompt_tokens": total_prompt_tokens,      # suma de todos los intentos
+            "compile_completion_tokens": total_completion_tokens,
+            "compile_latency_ms": total_latency_ms,
+            "compile_attempts": attempt,
         })
-
-        artifact.script_content = script
-        valid, validation_results = validate_script(artifact.script_content, request.input_data, request.expected_output)
-        artifact.validation_results = validation_results
-        if not valid:
-            raise ValueError(f"Compiled script failed validation: {validation_results[-1].message}")
+        if not (validation_results and all(r.passed for r in validation_results)):
+            raise ValueError(
+                f"Compiled script failed validation after {attempt} attempts: "
+                f"{validation_results[-1].message if validation_results else 'sin resultados'}")
     except Exception as e:
         logger.error(f"Compilation failed: {e}")
         raise
-        
+
     return artifact
