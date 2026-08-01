@@ -8,6 +8,7 @@ import sys
 import logging
 from typing import List, Optional, Any, Tuple
 from .models import ValidationResult
+from .rust_bridge import run_sandboxed
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,9 @@ class SecurityVisitor(ast.NodeVisitor):
 def gate_1_syntax(script_content: str) -> ValidationResult:
     """Gate 1: Syntax & AST Validation"""
     start = time.perf_counter()
+    if not script_content or not script_content.strip():
+        dur = (time.perf_counter() - start) * 1000
+        return ValidationResult(passed=False, gate_name="1_syntax_ast", message="Script vacío", duration_ms=dur)
     try:
         ast.parse(script_content)
         dur = (time.perf_counter() - start) * 1000
@@ -181,79 +185,57 @@ def security_check(script_content: str) -> Tuple[bool, str]:
     return r.passed, r.message
 
 
+def _coerce_expected(expected: Any) -> Any:
+    """Si `expected` viene como string JSON, lo parsea (para comparar objeto vs objeto).
+    Si no es JSON válido, se deja como string (comparación textual)."""
+    if isinstance(expected, str):
+        try:
+            return json.loads(expected)
+        except Exception:
+            return expected
+    return expected
+
+
 def gate_3_sandbox(script_content: str, sample_input: Optional[Any] = None) -> ValidationResult:
-    """Gate 3: Sandboxed Test Execution"""
+    """Gate 3: ejecución de prueba en el sandbox (seatbelt + rlimits)."""
     start = time.perf_counter()
     input_str = json.dumps(sample_input) if sample_input is not None else "{}"
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-        f.write(script_content)
-        temp_path = f.name
-
-    try:
-        proc = subprocess.run(
-            [sys.executable, temp_path],
-            input=input_str,
-            text=True,
-            capture_output=True,
-            timeout=5
-        )
-        dur = (time.perf_counter() - start) * 1000
-        if proc.returncode != 0:
-            return ValidationResult(passed=False, gate_name="3_sandbox", message=f"Runtime error (exit code {proc.returncode}): {proc.stderr.strip()}", duration_ms=dur)
-        
-        try:
-            json.loads(proc.stdout.strip()) if proc.stdout.strip() else None
-        except Exception:
-            return ValidationResult(passed=False, gate_name="3_sandbox", message=f"Output is not valid JSON: {proc.stdout[:100]}", duration_ms=dur)
-
-        return ValidationResult(passed=True, gate_name="3_sandbox", message="Sandbox execution successful", duration_ms=dur)
-    except subprocess.TimeoutExpired:
-        dur = (time.perf_counter() - start) * 1000
+    rc, stdout, stderr, timed_out = run_sandboxed(script_content, input_str, timeout=5)
+    dur = (time.perf_counter() - start) * 1000
+    if timed_out:
         return ValidationResult(passed=False, gate_name="3_sandbox", message="Execution timed out (>5s)", duration_ms=dur)
-    finally:
-        import os
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+    if rc != 0:
+        return ValidationResult(passed=False, gate_name="3_sandbox", message=f"Runtime error (exit code {rc}): {stderr.strip()}", duration_ms=dur)
+    try:
+        json.loads(stdout.strip()) if stdout.strip() else None
+    except Exception:
+        return ValidationResult(passed=False, gate_name="3_sandbox", message=f"Output is not valid JSON: {stdout[:100]}", duration_ms=dur)
+    return ValidationResult(passed=True, gate_name="3_sandbox", message="Sandbox execution successful", duration_ms=dur)
+
 
 def gate_4_semantic(script_content: str, input_data: Any, expected_output: Optional[str] = None) -> ValidationResult:
-    """Gate 4: Semantic Accuracy & Output Verification"""
+    """Gate 4: verificación semántica contra un output esperado."""
     start = time.perf_counter()
     if not expected_output:
         dur = (time.perf_counter() - start) * 1000
         return ValidationResult(passed=True, gate_name="4_semantic", message="No expected output provided, skipped semantic gate", duration_ms=dur)
 
     input_str = json.dumps(input_data) if input_data is not None else "{}"
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-        f.write(script_content)
-        temp_path = f.name
-
+    rc, stdout, stderr, timed_out = run_sandboxed(script_content, input_str, timeout=5)
+    dur = (time.perf_counter() - start) * 1000
+    if timed_out:
+        return ValidationResult(passed=False, gate_name="4_semantic", message="Execution timed out (>5s)", duration_ms=dur)
+    output_str = stdout.strip()
     try:
-        proc = subprocess.run(
-            [sys.executable, temp_path],
-            input=input_str,
-            text=True,
-            capture_output=True,
-            timeout=5
-        )
-        dur = (time.perf_counter() - start) * 1000
-        output_str = proc.stdout.strip()
-        
-        try:
-            actual = json.loads(output_str)
-            expected = json.loads(expected_output)
-            if actual == expected:
-                return ValidationResult(passed=True, gate_name="4_semantic", message="Exact semantic match", duration_ms=dur)
-            else:
-                return ValidationResult(passed=False, gate_name="4_semantic", message=f"Output mismatch: got {actual}, expected {expected}", duration_ms=dur)
-        except Exception:
-            if expected_output.strip() == output_str:
-                return ValidationResult(passed=True, gate_name="4_semantic", message="String match passed", duration_ms=dur)
-            return ValidationResult(passed=False, gate_name="4_semantic", message="Semantic verification failed", duration_ms=dur)
-    finally:
-        import os
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        actual = json.loads(output_str)
+        expected = json.loads(expected_output)
+        if actual == expected:
+            return ValidationResult(passed=True, gate_name="4_semantic", message="Exact semantic match", duration_ms=dur)
+        return ValidationResult(passed=False, gate_name="4_semantic", message=f"Output mismatch: got {actual}, expected {expected}", duration_ms=dur)
+    except Exception:
+        if expected_output.strip() == output_str:
+            return ValidationResult(passed=True, gate_name="4_semantic", message="String match passed", duration_ms=dur)
+        return ValidationResult(passed=False, gate_name="4_semantic", message="Semantic verification failed", duration_ms=dur)
 
 def gate_5_examples(script_content: str, examples: Optional[List[Any]] = None) -> ValidationResult:
     """Gate 5: Generalización — el script debe pasar TODOS los ejemplos held-out.
@@ -269,25 +251,19 @@ def gate_5_examples(script_content: str, examples: Optional[List[Any]] = None) -
 
     for i, ex in enumerate(examples):
         input_str = json.dumps(ex.input_data) if ex.input_data is not None else "{}"
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write(script_content)
-            temp_path = f.name
+        rc, stdout, stderr, timed_out = run_sandboxed(script_content, input_str, timeout=5)
+        dur = (time.perf_counter() - start) * 1000
+        if timed_out:
+            return ValidationResult(passed=False, gate_name="5_examples", message=f"Ejemplo {i}: timeout (>5s)", duration_ms=dur)
+        if rc != 0:
+            return ValidationResult(passed=False, gate_name="5_examples", message=f"Ejemplo {i}: runtime error: {stderr.strip()[:120]}", duration_ms=dur)
         try:
-            proc = subprocess.run([sys.executable, temp_path], input=input_str, text=True, capture_output=True, timeout=5)
-            if proc.returncode != 0:
-                dur = (time.perf_counter() - start) * 1000
-                return ValidationResult(passed=False, gate_name="5_examples", message=f"Ejemplo {i}: runtime error: {proc.stderr.strip()[:120]}", duration_ms=dur)
-            try:
-                actual = json.loads(proc.stdout.strip())
-            except Exception:
-                dur = (time.perf_counter() - start) * 1000
-                return ValidationResult(passed=False, gate_name="5_examples", message=f"Ejemplo {i}: output no es JSON: {proc.stdout[:80]}", duration_ms=dur)
-            if actual != ex.expected_output:
-                dur = (time.perf_counter() - start) * 1000
-                return ValidationResult(passed=False, gate_name="5_examples", message=f"Ejemplo {i}: got {actual}, expected {ex.expected_output}", duration_ms=dur)
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
+            actual = json.loads(stdout.strip())
+        except Exception:
+            return ValidationResult(passed=False, gate_name="5_examples", message=f"Ejemplo {i}: output no es JSON: {stdout[:80]}", duration_ms=dur)
+        expected = _coerce_expected(ex.expected_output)  # BUG2: parsear si viene como string JSON
+        if actual != expected:
+            return ValidationResult(passed=False, gate_name="5_examples", message=f"Ejemplo {i}: got {actual}, expected {expected}", duration_ms=dur)
 
     dur = (time.perf_counter() - start) * 1000
     return ValidationResult(passed=True, gate_name="5_examples", message=f"Pasó los {len(examples)} ejemplos held-out", duration_ms=dur)

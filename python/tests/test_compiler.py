@@ -42,6 +42,14 @@ def test_compile_retries_on_validation_failure(monkeypatch):
     # Tokens acumulados de ambos intentos (10+20 x2).
     assert artifact.metadata["compile_prompt_tokens"] == 20
 
+def test_compile_rejects_empty_script(monkeypatch):
+    # BUG3: si el LLM devuelve vacío, no debe cachearse como artifact válido.
+    client = _FakeClient([""])  # siempre vacío
+    monkeypatch.setattr("compiled_ai_router.compiler.openai.Client", lambda *a, **k: client)
+    req = TaskRequest(prompt="do something", input_data={})
+    with pytest.raises(ValueError):
+        compile_task(req, api_key="sk-test", model="gpt-4o-mini")
+
 def test_compile_demo_fails_unsatisfiable_examples():
     # Un ejemplo que el script no puede satisfacer -> la compilación falla (no cachea basura).
     ex = ExampleIO(input_data={"text": "INV-1 $5.00 2026-01-01"}, expected_output={"totally": "wrong"})

@@ -103,6 +103,12 @@ Cerrar el loop de compilación con rigor (idea robada de PROSE/FlashFill: exigir
 - [x] **Golden tests** del gate de ejemplos y de la compilación con ejemplos (satisfacibles → pasa; imposibles → falla y no cachea).
 - [ ] **Verificación con LLM real (pendiente):** correr el path real contra **Ollama cloud** (no local) end-to-end. Requiere `ollama signin` + modelo cloud.
 - [ ] Contrato de I/O documentado con más casos borde (hoy: JSON stdin→stdout; el system prompt lo fija).
+- [x] **Revisión adversaria (agente fresco) + fixes** — 4 bugs corregidos con test de regresión (51 tests):
+  - `gate_5` no atrapaba `TimeoutExpired` → un ejemplo con bucle infinito abortaba la compilación en vez de disparar el retry. Ahora manejado.
+  - `gate_5` comparaba output parseado vs `expected_output` crudo → falso negativo si venía como string JSON. Ahora se parsea (`_coerce_expected`).
+  - Script vacío pasaba todos los gates → `gate_1` ahora rechaza vacío.
+  - **Gap de seguridad cerrado:** los gates 3/4/5 ejecutaban código no confiable SIN el sandbox de OS. Ahora corren vía `run_sandboxed` (seatbelt + rlimits), igual que el runtime.
+  - *Conocido (menor):* la comparación de ejemplos usa `==` de Python (`True==1`, `1==1.0`); no distingue esos tipos. Aceptable por ahora.
 
 ### Fase 4 — Diferenciador: confianza medida en vivo (shadow execution) ⭐
 Lo que te separa de un "caché de LLM". Ver D-5.
