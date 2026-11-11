@@ -1,13 +1,37 @@
+<div align="center">
+
 # Petra
 
-Petra is a prototype gateway that turns repetitive LLM tasks into plain Python scripts. The first time it sees a task (for example "extract the total and date from this invoice"), it asks an LLM to write a small, deterministic script for it, validates that script, and caches it. Later requests of the same kind run the cached script locally instead of calling the LLM again. One-off requests still go straight to the LLM.
+**Compile repetitive LLM tasks into validated Python scripts, then run them locally instead of calling the model each time.**
 
-The idea: many production LLM calls do the same job over and over on differently shaped inputs. Paying for a model call (and waiting seconds for it) every time is wasteful if a 50-line script can do the job.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![OpenAI-compatible](https://img.shields.io/badge/LLM-OpenAI--compatible%20%7C%20Ollama-412991)](#quick-start)
+![Status](https://img.shields.io/badge/status-prototype-orange)
 
-![Petra dashboard running in demo mode](docs/screenshot.png)
-*Dashboard in demo mode (no API key). Numbers in demo mode are simulated and labelled as such.*
+</div>
+
+The first time Petra sees a task (for example "extract the total and date from this invoice"), it asks an LLM to write a small, deterministic script for it, validates that script, and caches it. Later requests of the same kind run the cached script locally. One-off requests still go straight to the LLM.
+
+Many production LLM calls do the same job over and over on differently shaped inputs. Paying for a model call, and waiting seconds for it, every time is wasteful if a 50-line script can do the job.
+
+<p align="center">
+  <img src="docs/screenshot.png" alt="Petra dashboard running in demo mode" width="860"><br>
+  <sub>Dashboard in demo mode (no API key). Numbers in demo mode are simulated and labelled as such.</sub>
+</p>
 
 > **Status: prototype.** The compile → validate → cache → execute loop works end to end, including with a real LLM. Code execution is **not** strongly sandboxed yet (see [Security](#security)). Do not run it on untrusted input.
+
+## Features
+
+- **Router**: matches requests to cached scripts by prompt similarity; one-off requests pass through to the LLM.
+- **Compiler**: asks the LLM for a standard-library-only script (JSON in, JSON out) and retries with the validation error, up to 3 attempts.
+- **Validation gates**: AST syntax check, import allowlist, optional Bandit scan, sandboxed run, and checks against held-out examples.
+- **Drift handling**: a cached script that fails on a new input is recompiled.
+- **Measurement**: latency, tokens and cost per request, with real numbers marked `measured: true`.
+- **Interfaces**: REST API, CLI and a web dashboard.
+- **Models**: OpenAI or any OpenAI-compatible endpoint, including local Ollama.
 
 ## How it works
 
