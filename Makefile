@@ -2,11 +2,11 @@
 
 setup:
 	@echo "Installing dependencies..."
-	@pip install -r python/requirements.txt || true
+	@pip install -r python/requirements.txt -r python/requirements-dev.txt
 
 build:
 	@echo "Installing Python package..."
-	@pip install -e python || true
+	@pip install -e python
 
 run:
 	@echo "Starting API server..."

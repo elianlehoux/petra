@@ -25,6 +25,8 @@ try:
 except ImportError:  # pragma: no cover - Windows
     resource = None
 
+logger = logging.getLogger(__name__)
+
 # Sandbox de OS en macOS (seatbelt). Contiene el DAÑO aunque el gate estático se
 # evada (los gates de AST NO son un límite de seguridad — ver docs/ROADMAP.md D-2):
 # confina la escritura de archivos al workdir temporal y DENIEGA la red.
@@ -59,12 +61,13 @@ def _seatbelt_profile(workdir_real: str) -> str:
 
 
 def _build_cmd(script_path: str, workdir_real: str) -> List[str]:
-    base = [sys.executable, "-I", script_path]
+    # Ruta absoluta: el subproceso corre con cwd=workdir temporal, así que una
+    # ruta relativa (ARTIFACT_DIR="./artifacts" por defecto) no se encontraría.
+    base = [sys.executable, "-I", os.path.abspath(script_path)]
     if _SANDBOX_EXEC:
         return [_SANDBOX_EXEC, "-p", _seatbelt_profile(workdir_real)] + base
     return base
 
-logger = logging.getLogger(__name__)
 
 # Límites del sandbox de ejecución (interino, ver docs/ROADMAP.md Fase 2).
 # NO es aislamiento fuerte (para eso: WASM/microVM), pero acota daño y runaway.
