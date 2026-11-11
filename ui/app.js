@@ -1,4 +1,5 @@
-const API_BASE = "http://127.0.0.1:8080";
+// Same origin: the API serves this UI (see api.py), so relative URLs work on any host/port.
+const API_BASE = "";
 
 const templates = {
   invoice: {

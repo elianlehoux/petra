@@ -43,3 +43,6 @@ artifacts/
 
 # Subagent worktrees (transitorios)
 .claude/worktrees/
+
+# Vendored dependencies (install from requirements instead)
+vendor_deps/

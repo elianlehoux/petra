@@ -1,119 +1,110 @@
-# Petra — intelligence that runs at the speed of code
+# Petra
 
-> **Petra** convierte la probabilidad difusa de un LLM en código sólido y determinista: compila una tarea una vez y la ejecuta muchas, rápido y auditable. (El paquete Python todavía se importa como `compiled_ai_router` — rename pendiente en el roadmap.)
+Petra is a prototype gateway that turns repetitive LLM tasks into plain Python scripts. The first time it sees a task (for example "extract the total and date from this invoice"), it asks an LLM to write a small, deterministic script for it, validates that script, and caches it. Later requests of the same kind run the cached script locally instead of calling the LLM again. One-off requests still go straight to the LLM.
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/CompiledAI/router)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+The idea: many production LLM calls do the same job over and over on differently shaped inputs. Paying for a model call (and waiting seconds for it) every time is wasteful if a 50-line script can do the job.
 
-**Compiled AI Router** transforms slow, expensive LLM calls into deterministic, local code executions. Instead of sending every request to an LLM, the router analyzes tasks and **compiles** repeatable patterns into local execution artifacts. You get the flexibility of GenAI with the reliability and cost-profile of traditional software.
+![Petra dashboard running in demo mode](docs/screenshot.png)
+*Dashboard in demo mode (no API key). Numbers in demo mode are simulated and labelled as such.*
 
-> ⚠️ **Estado: prototipo.** El loop (compilar → cachear → ejecutar) funciona en modo `demo`, pero las métricas de performance/costo todavía **no están medidas** (ver nota en *Key Metrics*) y la ejecución **aún no corre en un sandbox real**. El plan para llevarlo a producto está en [`docs/ROADMAP.md`](docs/ROADMAP.md); el análisis del paradigma, en [`docs/investigacion-ia-compilada.md`](docs/investigacion-ia-compilada.md).
+> **Status: prototype.** The compile → validate → cache → execute loop works end to end, including with a real LLM. Code execution is **not** strongly sandboxed yet (see [Security](#security)). Do not run it on untrusted input.
 
-## Architecture
+## How it works
 
 ```mermaid
-flowchart TB
-  subgraph "Compile Time (Once)"
-    A[Task Request] --> B{Router}
-    B -->|New Task| C[LLM Compilation]
-    C --> D[Validation Pipeline]
-    D --> E[Artifact Store]
-  end
-  subgraph "Runtime (N times)"
-    F[Same/Similar Request] --> B
-    B -->|Cache Hit| G[Compiled Artifact]
-    G --> H[Direct Execution]
-    H --> I[Result in <100ms]
-  end
-  subgraph "Fallback"
-    B -->|Novel/One-off| J[LLM Passthrough]
-  end
+flowchart LR
+  R[Request] --> S{Similar artifact cached?}
+  S -- yes --> X[Run cached script locally]
+  S -- no, repeatable task --> C[LLM writes a Python script]
+  C --> V[Validation gates]
+  V -- pass --> A[(Artifact store)] --> X
+  V -- fail --> C
+  S -- one-off --> P[LLM passthrough]
+  X -- fails on new input --> C
 ```
 
-## Key Metrics (objetivo, aún no medido)
+1. **Routing.** A request (prompt + input JSON) is matched against cached artifacts with TF-IDF similarity on the prompt. Requests that don't look repeatable go to the LLM directly.
+2. **Compilation.** The LLM is asked for a standard-library-only Python script that reads JSON on stdin and writes JSON on stdout.
+3. **Validation.** Before caching, the script must pass: syntax check (AST), an import allowlist and forbidden-name check, an optional [Bandit](https://github.com/PyCQA/bandit) scan, a run on the sample input in a restricted subprocess, and, if the request includes held-out examples, a check that it produces the expected output for all of them. If a script fails validation, the error is sent back to the LLM and it gets up to 3 attempts.
+4. **Execution and drift.** Cached scripts run in a fresh subprocess. If a cached script fails on a new input, Petra recompiles it.
+5. **Measurement.** Every request records route, latency, tokens and cost. Results from real LLM calls are marked `measured: true`. Demo-mode estimates are marked `measured: false`.
 
-Estos son los números **objetivo**, alineados con lo que reporta la literatura del paradigma
-(ver [investigación](docs/investigacion-ia-compilada.md)). **Todavía no están medidos en este
-proyecto** — obtenerlos de verdad es la Fase 1 del [ROADMAP](docs/ROADMAP.md).
+## Measured so far
 
-- **Cost**: órdenes de magnitud más barato que llamar al LLM en cada request (objetivo)
-- **Latency**: mucho menor que el LLM para ejecuciones cacheadas (objetivo)
-- **Breakeven**: el costo de compilación se amortiza tras unas ~17-18 ejecuciones repetidas
+One run of the `measure` command (invoice extraction, 20 iterations) against a local model (Ollama `gemma4`) on a single machine, raw output in [`docs/measurement-local-gemma4.json`](docs/measurement-local-gemma4.json):
 
-## Quick Start
+| | Average latency |
+|---|---|
+| LLM call (passthrough) | ~11.3 s |
+| Cached script | ~51 ms |
 
-1. **Clone repo**: `git clone <repo-url> && cd compiled-ai-router`
-2. **Setup Env**: `cp .env.example .env` (Add your OPENAI_API_KEY)
-3. **Install**: `make setup && make build`
-4. **Demo**: `make demo` (works without API key)
-5. **Run**: `make run` (starts API server)
+The compile cost was recovered after about 7 executions. This is a single run on a small local model, not a benchmark. Cost savings against a hosted model have not been measured yet.
 
-### Demo Output Example
-```text
-$ make demo
-Running demo showcase...
-[Router] Request received: "Extract structured data from this invoice"
-[Router] Pattern not found. Compiling via LLM... (Latency: 840ms)
-[Router] Artifact generated and validated. Execution successful.
-[Router] Request received: "Extract structured data from this invoice (new data)"
-[Router] Cache Hit! Executing compiled artifact... (Latency: 4ms)
+## Quick start
+
+Requires Python 3.10+.
+
+```bash
+git clone https://github.com/elianlehoux/petra.git && cd petra
+python3 -m venv .venv && source .venv/bin/activate
+make setup && make build
+
+make demo      # runs without an API key (simulated LLM)
+make test      # unit + end-to-end tests
+make run       # API + dashboard on http://127.0.0.1:8080
 ```
 
-## API Reference
+To use a real model, copy `.env.example` to `.env` and set `OPENAI_API_KEY`. Any OpenAI-compatible endpoint works through `LLM_BASE_URL`. For example, a local Ollama:
 
-| Method | Path | Description | Example cURL |
-|--------|------|-------------|--------------|
-| `POST` | `/api/v1/process` | Processes a prompt and input payload, compiling if necessary. | `curl -X POST -H "Content-Type: application/json" -d '{"prompt":"...", "input_data":{}}' http://localhost:8080/api/v1/process` |
-| `GET`  | `/api/v1/health` | Health check endpoint | `curl http://localhost:8080/api/v1/health` |
-| `GET`  | `/api/v1/artifacts`| List compiled artifacts | `curl http://localhost:8080/api/v1/artifacts` |
+```bash
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_MODEL=gemma4:latest
+OPENAI_API_KEY=local
+```
 
-## CLI Reference
+Docker: `make docker-build && make docker-run`.
 
-| Command | Description | Example |
-|---------|-------------|---------|
-| `make setup` | Installs dependencies | `make setup` |
-| `make build` | Builds engine and installs package | `make build` |
-| `make run` | Starts the API Server | `make run` |
-| `make test` | Runs the test suite | `make test` |
-| `make benchmark` | Runs 100 iterations benchmark | `make benchmark` |
+## API
 
-## Architecture Deep Dive
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/route` | Route a request: run a cached script, compile a new one, or pass through to the LLM |
+| `POST` | `/compile` | Force compilation for a prompt |
+| `POST` | `/execute/{id}` | Run a specific artifact |
+| `GET` | `/artifacts`, `/artifacts/{id}` | List or inspect compiled artifacts |
+| `DELETE` | `/artifacts/{id}` | Delete an artifact |
+| `GET` | `/metrics` | Aggregate metrics |
+| `GET` | `/health` | Health check |
 
-### Compilation Process
-1. **Analysis**: Classifies the prompt (e.g., extraction, transformation).
-2. **Code Generation**: Synthesizes a self-contained Python script to parse the input pattern.
-3. **Artifact Creation**: Saves the executable logic to disk.
+```bash
+curl -X POST http://127.0.0.1:8080/route \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Convert this CSV to JSON records", "input_data": {"csv_data": "name,age\nAna,30"}}'
+```
 
-### Validation Pipeline
-All generated code passes through validation gates before caching:
-1. Syntax validation (AST)
-2. Security static analysis (AST import **allowlist** + forbidden names/dunders)
-2b. SAST with Bandit (optional — skipped if not installed)
-3. Sandboxed test execution (subprocess + rlimits + isolated interpreter)
-4. Output/semantic verification
+The same operations are available from the CLI: `python -m compiled_ai_router.cli {route,compile,execute,list,metrics,serve,benchmark,measure,demo}`.
 
-> ⚠️ Estos gates son **defensa en profundidad, no una jaula**. El gate estático (allowlist)
-> es la defensa principal; el executor con rlimits acota runaway (CPU/timeout) pero **no**
-> aísla FS/red/memoria en macOS. El aislamiento real (WASM / microVM) es la Fase 2 del
-> [ROADMAP](docs/ROADMAP.md).
+## Security
 
-## Performance Model
+The static gates are defense in depth, not isolation. Today:
 
-The amortized cost formula for the Router:
-`Total Cost = (Cost_LLM_Compile * 1) + (Cost_Compute * N)`
-For large N, the cost per request converges to O(1) standard compute cost.
+- **macOS:** scripts run under `sandbox-exec` (no network, writes limited to a temporary directory) plus CPU, time, file and process limits.
+- **Linux and others:** only resource limits (including memory) are applied. File system and network are not confined.
 
-## Configuration
+Real isolation is the next phase. A WASM spike (`wasmtime` + CPython compiled to WASI) is documented in [`docs/wasm-sandbox-spike.md`](docs/wasm-sandbox-spike.md): isolation worked, but booting CPython inside WASM cost ~70 ms per run, about twice the current subprocess.
 
-| Environment Variable | Description | Default |
-|----------------------|-------------|---------|
-| `OPENAI_API_KEY`     | API key for LLM compilation | `null` |
-| `LLM_MODEL`          | Model used for code generation | `gpt-4o-mini` |
-| `ARTIFACT_DIR`       | Directory for saving artifacts | `./artifacts` |
-| `API_PORT`           | Port for the API server | `8080` |
+## Project layout
 
-## Development
-Contributions are welcome! Please ensure you pass tests (`make test`) and format your code before creating a Pull Request.
+```
+python/compiled_ai_router/   router, compiler, validation gates, executor, API, CLI
+python/tests/                unit and end-to-end tests
+ui/                          dashboard served by the API
+docs/                        roadmap, research notes and WASM spike (in Spanish)
+spike/                       WASM sandbox prototype and benchmarks
+```
+
+The Python package is still called `compiled_ai_router`, the project's earlier name.
 
 ## License
-MIT License. See [LICENSE](LICENSE) for more details.
+
+MIT. See [LICENSE](LICENSE).
